@@ -49,7 +49,7 @@ tests/run.sh        # engine tests on the desktop JVM, incl. a fake SteamGridDB 
 
 **Releasing:** bump `versionCode`/`versionName` in `AndroidManifest.xml`, add `release-notes/vX.Y.md`, then push a matching tag (`git tag vX.Y && git push origin vX.Y`). The Release workflow tests, builds and signs the APK, then publishes it as a GitHub release, which the in-app updater picks up. It needs a repository secret `KEYSTORE_B64` holding the base64 of `release.keystore`, and it refuses to publish without it. The repository must be public for the app to see releases.
 
-**Signing:** `build.sh` signs with `release.keystore` and creates a new key if that file is missing. The key isn't in this repository; keep yours safe and put it next to `build.sh` before building. Android only installs an update over an existing install if it's signed with the same key. Builds from GitHub Actions use a throwaway key, so they install as a fresh copy.
+**Signing:** `build.sh` signs with `release.keystore` and creates a new key if that file is missing. The key isn't in this repository; keep yours safe and put it next to `build.sh` before building. Android only installs an update over an existing install if it's signed with the same key. The Build workflow (every push) uses a throwaway key, so its APKs install as a fresh copy; the Release workflow signs with the real key from the `KEYSTORE_B64` secret.
 
 ## Layout
 
