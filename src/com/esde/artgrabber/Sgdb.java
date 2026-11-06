@@ -149,6 +149,33 @@ public class Sgdb {
         return "image/png";   // logos and icons have no JPEG variant
     }
 
+    private final Map<Long, String> steamIds = new HashMap<Long, String>();
+
+    /**
+     * The Steam app ID of a SteamGridDB game, if SteamGridDB knows it. Best effort: returns null when
+     * the information isn't there, so callers just carry on with SteamGridDB's own art.
+     */
+    public String steamIdFor(long gameId) {
+        if (steamIds.containsKey(gameId)) return steamIds.get(gameId);
+        String id = null;
+        try {
+            JSONObject res = get("/games/id/" + gameId + "?platformdata=steam", false);
+            JSONObject data = res.optJSONObject("data");
+            JSONObject ext = data == null ? null : data.optJSONObject("external_platform_data");
+            JSONArray st = ext == null ? null : ext.optJSONArray("steam");
+            if (st != null && st.length() > 0) {
+                Object v = st.optJSONObject(0) != null ? st.optJSONObject(0).opt("id") : st.opt(0);
+                if (v != null && String.valueOf(v).matches("\\d{1,10}")) id = String.valueOf(v);
+            }
+        } catch (BadKeyException e) {
+            id = null;
+        } catch (IOException e) {
+            id = null;
+        }
+        steamIds.put(gameId, id);
+        return id;
+    }
+
     /** kind = grids | heroes | logos | icons. Best-scored first, PNG/JPG only (ES-DE can't read WebP). */
     public List<Image> images(String kind, long gameId, String dimensions) throws IOException {
         String ck = kind + "/" + gameId + "/" + dimensions;

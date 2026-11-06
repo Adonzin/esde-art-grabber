@@ -80,13 +80,16 @@ public class MainActivity extends Activity {
     ProgressBar progress;
     Button runBtn, previewBtn, stopBtn, fixBtn;
     final Map<String, CheckBox> mediaBoxes = new HashMap<String, CheckBox>();
-    CheckBox overwriteBox, appIconBox;
+    CheckBox overwriteBox, appIconBox, srcSteam, srcSgdb, srcLibretro;
 
     File esdeDir, romDir, mediaDir;
     Set<String> chosenSystems = null; // null = all
     volatile Engine engine;
     Thread worker;
     final ThumbLoader thumbs = new ThumbLoader();
+    TextView updateText;
+    Button updateBtn;
+    Updater.Release pendingUpdate;
     final ArrayDeque<String> logLines = new ArrayDeque<String>();
     final List<Engine.Miss> misses = new ArrayList<Engine.Miss>();
     boolean logPending = false;
@@ -102,6 +105,8 @@ public class MainActivity extends Activity {
         buildUi();
         loadSettings();
         ensureStorageAccess();
+        // quiet daily check; the result only shows on the App updates card
+        if (System.currentTimeMillis() - prefs.getLong("lastUpdateCheck", 0) > 24L * 3600 * 1000) checkForUpdate(false);
     }
 
     @Override
@@ -321,6 +326,22 @@ public class MainActivity extends Activity {
             public void onCheckedChanged(android.widget.CompoundButton b, boolean c) { saveSettings(); }
         });
 
+        // sources
+        LinearLayout src = card(left, "Sources");
+        TextView srcHelp = text("Each game uses the first source that has art for it; the next ones fill whatever is "
+                + "still missing.", 12, MUTED, false);
+        srcHelp.setPadding(0, dp(6), 0, dp(2));
+        src.addView(srcHelp);
+        srcLibretro = checkbox("Libretro thumbnails – real box art, screenshots, title screens and logos for retro consoles");
+        srcSteam = checkbox("Official Steam art – for Steam games (and other games that are also on Steam)");
+        srcSgdb = checkbox("SteamGridDB – everything else (needs your API key)");
+        for (CheckBox cb : new CheckBox[]{srcLibretro, srcSteam, srcSgdb}) {
+            src.addView(cb);
+            cb.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+                public void onCheckedChanged(android.widget.CompoundButton b, boolean c) { saveSettings(); }
+            });
+        }
+
         // systems
         LinearLayout s = card(left, "Systems");
         systemsLabel = text("All systems", 15, TEXT, false);
@@ -342,6 +363,20 @@ public class MainActivity extends Activity {
         mm.addView(manualBtn, new LinearLayout.LayoutParams(-1, -2));
         manualBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { pickArtByHand(); }
+        });
+
+        // app updates
+        LinearLayout up = card(left, "App updates");
+        updateText = text("Installed: version " + myVersion(), 14, MUTED, false);
+        updateText.setPadding(0, dp(6), 0, dp(10));
+        up.addView(updateText);
+        updateBtn = button("Check for updates", false);
+        up.addView(updateBtn, new LinearLayout.LayoutParams(-1, -2));
+        updateBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                if (pendingUpdate != null) showUpdateDialog(pendingUpdate);
+                else checkForUpdate(true);
+            }
         });
 
         // ---------------- right: run + log
@@ -466,6 +501,9 @@ public class MainActivity extends Activity {
         for (Map.Entry<String, CheckBox> en : mediaBoxes.entrySet()) en.getValue().setChecked(media.contains(en.getKey()));
         overwriteBox.setChecked(prefs.getBoolean("overwrite", false));
         appIconBox.setChecked(prefs.getBoolean("appIcons", true));
+        srcLibretro.setChecked(prefs.getBoolean("srcLibretro", true));
+        srcSteam.setChecked(prefs.getBoolean("srcSteam", true));
+        srcSgdb.setChecked(prefs.getBoolean("srcSgdb", true));
         Set<String> sys = prefs.getStringSet("systems", null);
         chosenSystems = sys == null ? null : new HashSet<String>(sys);
         loading = false;
@@ -483,6 +521,9 @@ public class MainActivity extends Activity {
         ed.putStringSet("mediaTypes", media);
         ed.putBoolean("overwrite", overwriteBox.isChecked());
         ed.putBoolean("appIcons", appIconBox.isChecked());
+        ed.putBoolean("srcLibretro", srcLibretro.isChecked());
+        ed.putBoolean("srcSteam", srcSteam.isChecked());
+        ed.putBoolean("srcSgdb", srcSgdb.isChecked());
         if (chosenSystems == null) ed.remove("systems");
         else ed.putStringSet("systems", new HashSet<String>(chosenSystems));
         ed.apply();
@@ -703,7 +744,9 @@ public class MainActivity extends Activity {
 
     /** Engine that sees every system folder on the device, not just one ROMs folder. */
     Engine newEngine() {
-        return new Engine(romDir, esdeDir, mediaDir, Engine.discoverSystems(romDir, esdeDir, storageRoots()));
+        Engine e = new Engine(romDir, esdeDir, mediaDir, Engine.discoverSystems(romDir, esdeDir, storageRoots()));
+        e.libretro = new Libretro(getCacheDir());   // remembers each system's image list for a week
+        return e;
     }
 
     /** Short human label for where a system folder lives. */
@@ -788,6 +831,9 @@ public class MainActivity extends Activity {
         for (String[] ml : MEDIA_LABELS) if (mediaBoxes.get(ml[0]).isChecked()) o.media.add(ml[0]);
         o.overwrite = overwriteBox.isChecked();
         o.appMarquees = appIconBox.isChecked();
+        o.useLibretro = srcLibretro.isChecked();
+        o.useSteam = srcSteam.isChecked();
+        o.useSgdb = srcSgdb.isChecked();
         o.dryRun = dry;
         o.systems = chosenSystems;
         o.manualMatches = manualMatches();
@@ -797,7 +843,11 @@ public class MainActivity extends Activity {
     void startRun(final boolean dry) {
         if (worker != null && worker.isAlive()) return;
         final String key = prefs.getString("key", "");
-        if (key.length() == 0) { askForKey(); return; }
+        if (!srcLibretro.isChecked() && !srcSteam.isChecked() && !srcSgdb.isChecked()) {
+            toast("Turn on at least one source.");
+            return;
+        }
+        if (srcSgdb.isChecked() && key.length() == 0) { askForKey(); return; }
         if (!canUseStorage()) { refreshAccessCard(); toast("Allow file access first."); return; }
         if (romDir == null || !romDir.isDirectory()) { toast("Set your ROMs folder first."); return; }
         if (mediaDir == null) { toast("Set the ES-DE media folder first."); return; }
@@ -824,7 +874,7 @@ public class MainActivity extends Activity {
         engine = e;
         worker = new Thread(new Runnable() {
             public void run() {
-                final Engine.Result r = e.run(new Sgdb(key), o, new Engine.Listener() {
+                final Engine.Result r = e.run(o.useSgdb ? new Sgdb(key) : null, o, new Engine.Listener() {
                     public void log(String line) { appendLog(line); }
                     public void progress(final int done, final int total) {
                         ui.post(new Runnable() {
@@ -1043,6 +1093,158 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    // ================================================================= app updates
+
+    String myVersion() {
+        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
+        catch (Exception e) { return "?"; }
+    }
+
+    void checkForUpdate(final boolean userAsked) {
+        if (userAsked) {
+            updateBtn.setEnabled(false);
+            updateText.setText("Checking GitHub for a newer version…");
+            updateText.setTextColor(MUTED);
+        }
+        new Thread(new Runnable() {
+            public void run() {
+                Updater.Release r = null;
+                String msg;
+                try {
+                    r = new Updater().latest();
+                    prefs.edit().putLong("lastUpdateCheck", System.currentTimeMillis()).apply();
+                    msg = Updater.newer(r.version, myVersion()) ? null
+                            : "You have the latest version (" + myVersion() + ").";
+                } catch (Updater.NoReleaseException e) {
+                    msg = e.getMessage();
+                } catch (Exception e) {
+                    msg = "Couldn't check for updates: " + e.getMessage();
+                }
+                final Updater.Release fr = r;
+                final String fm = msg;
+                ui.post(new Runnable() {
+                    public void run() {
+                        updateBtn.setEnabled(true);
+                        if (fm == null) {
+                            pendingUpdate = fr;
+                            updateText.setText("Version " + fr.version + " is available (you have " + myVersion() + ").");
+                            updateText.setTextColor(GOOD);
+                            updateBtn.setText("Update to " + fr.version);
+                            updateBtn.setBackground(focusable(ACCENT, Color.parseColor("#3B74E0")));
+                            updateBtn.setTextColor(Color.WHITE);
+                            if (userAsked) showUpdateDialog(fr);
+                        } else if (userAsked) {
+                            updateText.setText(fm);
+                            updateText.setTextColor(fm.startsWith("You have") ? GOOD : WARN);
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    void showUpdateDialog(final Updater.Release r) {
+        String notes = r.notes == null ? "" : r.notes.trim();
+        if (notes.length() > 1500) notes = notes.substring(0, 1500) + "…";
+        String size = r.size > 0 ? String.format(java.util.Locale.ROOT, " (%.1f MB)", r.size / 1048576.0) : "";
+        dialog().setTitle("Update to version " + r.version + "?")
+                .setMessage((notes.length() > 0 ? notes + "\n\n" : "") + "Downloads the new app" + size
+                        + " and opens Android's installer. Your settings are kept.")
+                .setPositiveButton("Download and install", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) { downloadUpdate(r); }
+                })
+                .setNegativeButton("Not now", null).show();
+    }
+
+    /** Android 8+: this app must be allowed to install apps. Reflection because we build against API 23. */
+    boolean mayInstallApps() {
+        if (android.os.Build.VERSION.SDK_INT < 26) return true;
+        try {
+            Object ok = PackageManager.class.getMethod("canRequestPackageInstalls").invoke(getPackageManager());
+            return Boolean.TRUE.equals(ok);
+        } catch (Exception e) {
+            return true;   // can't tell: let the installer ask
+        }
+    }
+
+    void downloadUpdate(final Updater.Release r) {
+        if (!mayInstallApps()) {
+            dialog().setTitle("Allow updates")
+                    .setMessage("Android needs your OK for this app to install its own updates. On the next screen, "
+                            + "turn on \"Allow from this source\", come back, and tap Update again.")
+                    .setPositiveButton("Open setting", new DialogInterface.OnClickListener() {
+                        public void onClick(DialogInterface d, int w) {
+                            try {
+                                startActivity(new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES",
+                                        Uri.parse("package:" + getPackageName())));
+                            } catch (Exception e) {
+                                toast("Allow installing unknown apps for ES-DE Art Grabber in Android settings.");
+                            }
+                        }
+                    })
+                    .setNegativeButton("Cancel", null).show();
+            return;
+        }
+        final ProgressBar bar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        bar.setMax(1000);
+        final TextView label = text("Starting download…", 13, MUTED, false);
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.setOrientation(LinearLayout.VERTICAL);
+        wrap.setPadding(dp(20), dp(10), dp(20), 0);
+        wrap.addView(bar, new LinearLayout.LayoutParams(-1, dp(12)));
+        wrap.addView(label);
+        final AlertDialog dlg = dialog().setTitle("Downloading " + r.version).setView(wrap).setCancelable(false).show();
+        new Thread(new Runnable() {
+            public void run() {
+                String err = null;
+                final File apk = UpdateProvider.file(MainActivity.this);
+                try {
+                    new Updater().download(r, apk, new Updater.Progress() {
+                        public void update(final long done, final long total) {
+                            ui.post(new Runnable() {
+                                public void run() {
+                                    if (total > 0) bar.setProgress((int) (done * 1000 / total));
+                                    label.setText(String.format(java.util.Locale.ROOT, "%.1f / %.1f MB",
+                                            done / 1048576.0, Math.max(total, done) / 1048576.0));
+                                }
+                            });
+                        }
+                    });
+                } catch (Exception e) {
+                    err = e.getMessage();
+                }
+                final String fe = err;
+                ui.post(new Runnable() {
+                    public void run() {
+                        dlg.dismiss();
+                        if (fe != null) { toast("Update failed: " + fe); return; }
+                        installUpdate(apk);
+                    }
+                });
+            }
+        }).start();
+    }
+
+    void installUpdate(File apk) {
+        try {
+            Intent i = new Intent(Intent.ACTION_VIEW);
+            if (android.os.Build.VERSION.SDK_INT >= 24) {
+                i.setDataAndType(UpdateProvider.uri(), "application/vnd.android.package-archive");
+                i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } else {
+                // Android 6: the installer reads plain files; use a world-readable copy
+                File ext = new File(getExternalCacheDir(), "update.apk");
+                Engine.copyFile(apk, ext);
+                i.setDataAndType(Uri.fromFile(ext), "application/vnd.android.package-archive");
+            }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(i);
+        } catch (Exception e) {
+            toast("Couldn't open the installer: " + e.getMessage());
+        }
     }
 
     // ================================================================= manual art picking

@@ -71,6 +71,7 @@ public class Engine {
 
     public static class Options {
         public boolean appMarquees = true;
+        public boolean useSteam = true, useSgdb = true, useLibretro = true;
         public List<String> media = new ArrayList<String>(Arrays.asList("covers", "marquees", "fanart", "screenshots"));
         public Set<String> systems = null;   // null = all
         public boolean overwrite = false;
@@ -112,6 +113,8 @@ public class Engine {
     public final Map<String, File> systemDirs;
     public volatile boolean stop = false;
     public AppArt appArt;
+    public Libretro libretro = new Libretro(null);
+    public SteamArt steam = new SteamArt();
 
     public Engine(File romDir, File esdeDir, File mediaDir) {
         this(romDir, esdeDir, mediaDir, discoverSystems(romDir, esdeDir, new ArrayList<File>()));
@@ -451,7 +454,7 @@ public class Engine {
                 res.failed++;
                 l.log("  ! " + g.base() + " – " + e.getMessage());
             }
-            synchronized (api.rejections) {
+            if (api != null) synchronized (api.rejections) {
                 for (String rj : api.rejections) l.log("    ⓘ SteamGridDB refused a request: " + rj + " – skipped it and carried on");
                 api.rejections.clear();
             }
@@ -513,31 +516,111 @@ public class Engine {
             if (!got.isEmpty()) l.log("  + " + base + "  → " + pkg + "  " + join(got));
         }
 
+        String query = names != null && names.get(normPath(g.rel)) != null ? names.get(normPath(g.rel)) : Names.clean(base);
+        List<String> got = new ArrayList<String>();
+        String matchedAs = null;
+
+        // 1. Libretro thumbnails: real box art, screenshots, title screens and logos for retro systems
+        String lr = o.useLibretro && libretro != null ? Libretro.libretroName(g.system) : null;
+        if (lr != null && !lrFailed.contains(lr)) {
+            try {
+                String chosen = null;
+                for (String m : new ArrayList<String>(todo)) {
+                    String type = Libretro.TYPES.get(m);
+                    if (type == null) continue;
+                    Libretro.Index ix = libretro.index(lr, type);
+                    String name = chosen != null && ix.has(chosen) ? chosen : Libretro.match(ix, base, query);
+                    if (name == null) continue;
+                    if (chosen == null) chosen = name;
+                    File dir = mediaFolder(g, m);
+                    File dest = new File(dir, base + ".png");
+                    boolean ok = true;
+                    if (!o.dryRun) {
+                        if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("can't create " + dir.getPath());
+                        ok = libretro.download(lr, type, name, dest);
+                        if (ok) dropOld(have.get(m), dest);
+                    }
+                    if (ok) { todo.remove(m); res.saved++; got.add(m + " (Libretro)"); }
+                }
+                if (chosen != null) matchedAs = chosen;
+            } catch (IOException e) {
+                lrFailed.add(lr);
+                l.log("  ⓘ Libretro thumbnails unavailable for " + g.system + " (" + e.getMessage() + ") – using SteamGridDB");
+            }
+        }
+
+        // 2. Official Steam art, when the entry carries its Steam app ID
+        String appId = g.isDir || !mayHoldSteamId(g) ? null : steamAppId(new File(sysDir(g.system), g.rel));
+        if (o.useSteam && steam != null && appId != null && !todo.isEmpty()) {
+            if (steamStage(o, res, g, appId, todo, have, got) && matchedAs == null) matchedAs = "Steam app " + appId;
+        }
+
+        // 3. SteamGridDB for whatever is still missing
         Sgdb.Game game = null;
         double score = 0;
-        Long manual = o.manualMatches.get(g.key());
-        if (manual != null) { game = new Sgdb.Game(manual, "your pick", 0); score = 1; }
-        String appId = g.isDir || game != null || !mayHoldSteamId(g) ? null : steamAppId(new File(sysDir(g.system), g.rel));
-        if (appId != null) { game = api.gameBySteamId(appId); score = game != null ? 1 : 0; }
-        String query = names != null && names.get(normPath(g.rel)) != null ? names.get(normPath(g.rel)) : Names.clean(base);
-        if (game == null) {
-            for (Sgdb.Game c : api.search(query)) {
-                double s = Names.similarity(query, c.name);
-                if (s > score) { score = s; game = c; }
+        if (!todo.isEmpty() && o.useSgdb && api != null) {
+            Long manual = o.manualMatches.get(g.key());
+            if (manual != null) { game = new Sgdb.Game(manual, "your pick", 0); score = 1; }
+            if (game == null && appId != null) { game = api.gameBySteamId(appId); score = game != null ? 1 : 0; }
+            if (game == null) {
+                for (Sgdb.Game c : api.search(query)) {
+                    double sc = Names.similarity(query, c.name);
+                    if (sc > score) { score = sc; game = c; }
+                }
+                if (score < o.threshold) game = null;
             }
-            if (score < o.threshold) game = null;
+            if (game != null) {
+                // the same game on Steam? then prefer its official art there too
+                if (o.useSteam && steam != null && appId == null) {
+                    String sid = api.steamIdFor(game.id);
+                    if (sid != null) steamStage(o, res, g, sid, todo, have, got);
+                }
+                if (!todo.isEmpty()) got.addAll(fetchArt(api, o, res, g, game.id, todo, have));
+                matchedAs = game.name + "  [" + Math.round(score * 100) + "%]";
+            }
         }
-        if (game == null) {
+
+        if (matchedAs == null && got.isEmpty()) {
             res.noMatch++;
-            res.misses.add(new Miss(g, query));
+            if (o.useSgdb) res.misses.add(new Miss(g, query));
             l.log("  ✗ " + base + "  – no match for \"" + query + "\"");
             return;
         }
         res.matched++;
-        List<String> got = fetchArt(api, o, res, g, game.id, todo, have);
-        if (got.isEmpty() && errors.isEmpty()) { res.noArt++; l.log("  ~ " + base + "  → " + game.name + "  (no art of these types)"); }
-        else if (!got.isEmpty()) l.log("  + " + base + "  → " + game.name + "  [" + Math.round(score * 100) + "%]  " + join(got));
-        for (String err : errors) l.log("  ! " + base + "  – " + err);
+        if (got.isEmpty() && (errors == null || errors.isEmpty())) {
+            res.noArt++;
+            l.log("  ~ " + base + "  → " + matchedAs + "  (no art of these types)");
+        } else if (!got.isEmpty()) {
+            l.log("  + " + base + "  → " + (matchedAs == null ? "" : matchedAs + "  ") + join(got));
+        }
+        if (errors != null) { for (String err : errors) l.log("  ! " + base + "  – " + err); errors.clear(); }
+    }
+
+    /** Libretro systems that failed to list this run (rate limit, offline) – not retried per game. */
+    final Set<String> lrFailed = new HashSet<String>();
+
+    /** Tries Steam's official art for each wanted type. True if anything was (or would be) saved. */
+    boolean steamStage(Options o, Result res, GameFile g, String appId, List<String> todo,
+                       Map<String, File> have, List<String> got) throws IOException {
+        boolean any = false;
+        for (String m : new ArrayList<String>(todo)) {
+            if (!SteamArt.supports(m)) continue;
+            File dir = mediaFolder(g, m);
+            if (!o.dryRun && !dir.isDirectory() && !dir.mkdirs()) throw new IOException("can't create " + dir.getPath());
+            String ext = steam.save(appId, m, dir, g.base(), o.dryRun);
+            if (ext == null) continue;
+            if (!o.dryRun) dropOld(have.get(m), new File(dir, g.base() + ext));
+            todo.remove(m);
+            res.saved++;
+            got.add(m + " (Steam)");
+            any = true;
+        }
+        return any;
+    }
+
+    /** ES-DE shows one file per name: remove the old image if it was saved in another format. */
+    static void dropOld(File old, File dest) {
+        if (old != null && !old.getAbsolutePath().equals(dest.getAbsolutePath())) old.delete();
     }
 
     /** Downloads the requested media types for one game. Returns the types that were saved. */

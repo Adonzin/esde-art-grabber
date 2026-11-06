@@ -22,6 +22,7 @@ public class EngineTest {
             List<Game> o = new ArrayList<>(); String k = Names.norm(t); k = k.substring(0, Math.min(4,k.length()));
             for (Map.Entry<String,Long> e : DB.entrySet()) if (Names.norm(e.getKey()).contains(k)) o.add(new Game(e.getValue(), e.getKey(), 0));
             return o; }
+        @Override public String steamIdFor(long id) { return null; }
         @Override public Game gameBySteamId(String id) { return new Game(99, "Hades (steam " + id + ")", 0); }
         @Override public List<Image> images(String kind, long id, String dims) {
             if (kind.equals("logos") && id == 6) return new ArrayList<>();
@@ -56,6 +57,7 @@ public class EngineTest {
         check(media.equals(new File(esde,"downloaded_media")), "default media dir");
 
         Engine e = new Engine(roms, esde, media);
+        e.libretro = null; e.steam = null;   // these tests cover SteamGridDB only
         final List<String> log = new ArrayList<>();
         Engine.Listener l = new Engine.Listener() { public void log(String s){ log.add(s); System.out.println("    | " + s); } public void progress(int d,int t){} };
 
@@ -96,6 +98,7 @@ public class EngineTest {
         final Set<String> installed = new HashSet<>(Arrays.asList("com.retroarch","org.dolphinemu.dolphinemu","com.chucklefish.stardewvalley","com.github.stenzek.duckstation"));
         Fake.DB.put("Stardew Valley", 7L);
         Engine e2 = new Engine(roms, esde, media);
+        e2.libretro = null; e2.steam = null;   // these tests cover SteamGridDB only
         e2.appArt = new Engine.AppArt() {
             public boolean isInstalled(String p) { return installed.contains(p); }
             public boolean saveMarquee(String p, File d) throws IOException { try (Writer w = new FileWriter(d)) { w.write("icon:" + p); } return true; } };
@@ -148,6 +151,7 @@ public class EngineTest {
         check(sys.get("snes").getPath().contains("sdcard"), "snes taken from the copy with games (SD), not the near-empty internal one");
         check(sys.get("n64").getPath().endsWith("Games/n64"), "custom_systems absolute path");
         Engine e3 = new Engine(rom2, esde2, new File(R2, "media"), sys);
+        e3.libretro = null; e3.steam = null;
         Engine.Options o3 = new Engine.Options(); o3.dryRun = true;
         Engine.Result r3 = e3.run(new Fake(), o3, l);
         check(r3.games == 6, "scans games in every location: " + r3.games);
@@ -163,6 +167,7 @@ public class EngineTest {
         touch("ROMs/windows/weird.xyz", "x");
         touch("ROMs/windows/save.sav", "x");
         Engine e4 = new Engine(roms, esde, media);
+        e4.libretro = null; e4.steam = null;   // these tests cover SteamGridDB only
         List<Engine.GameFile> wg = e4.scanSystem("windows");
         List<String> wn = new ArrayList<>(); for (Engine.GameFile x : wg) wn.add(x.rel);
         check(wn.equals(Arrays.asList("Celeste.gog","Hades.epic")), "windows: .epic/.gog accepted despite old systeminfo: " + wn);

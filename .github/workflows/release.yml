@@ -1,0 +1,48 @@
+name: Release
+
+# Push a tag like v1.10 (matching versionName in AndroidManifest.xml) to publish a signed release.
+# The app's "Update app" button installs the APK from the latest release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Android build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq android-sdk-platform-23 aapt apksigner dalvik-exchange zipalign libandroid-json-java
+      - name: Check the tag matches the app version
+        run: |
+          v=$(grep -o 'versionName="[^"]*"' AndroidManifest.xml | cut -d'"' -f2)
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "::error::Tag $GITHUB_REF_NAME but the app says version $v"; exit 1; }
+      - name: Run tests
+        run: tests/run.sh
+      - name: Restore the signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::The KEYSTORE_B64 secret is missing. Refusing to publish an APK that couldn't update existing installs."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > release.keystore
+      - name: Build signed APK
+        run: ./build.sh
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="release-notes/$GITHUB_REF_NAME.md"
+          [ -f "$notes" ] || { echo "Version ${GITHUB_REF_NAME#v}" > /tmp/notes.md; notes=/tmp/notes.md; }
+          gh release create "$GITHUB_REF_NAME" ES-DE-Art-Grabber.apk \
+            --title "ES-DE Art Grabber ${GITHUB_REF_NAME#v}" --notes-file "$notes"
+      - name: Remove the key from the runner
+        if: always()
+        run: rm -f release.keystore

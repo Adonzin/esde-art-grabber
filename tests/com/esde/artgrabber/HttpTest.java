@@ -39,6 +39,7 @@ public class HttpTest {
 
         Sgdb api = new Sgdb("KEY"); api.apiBase = base + "/api";
         Engine e = new Engine(roms, null, media);
+        e.libretro = null; e.steam = null;
         final List<String> log = new ArrayList<>();
         Engine.Options o = new Engine.Options();
         Engine.Result r = e.run(api, o, new Engine.Listener() { public void log(String s){ log.add(s); System.out.println("    | " + s);} public void progress(int d,int t){} });
