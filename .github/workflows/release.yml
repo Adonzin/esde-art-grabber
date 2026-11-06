@@ -1,10 +1,13 @@
 name: Release
 
-# Push a tag like v1.10 (matching versionName in AndroidManifest.xml) to publish a signed release.
+# Publishes a signed release whenever main carries an app version (versionName in AndroidManifest.xml)
+# that has no release yet. GitHub creates the vX.Y tag itself. Pushing a vX.Y tag works too.
 # The app's "Update app" button installs the APK from the latest release.
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,17 +17,30 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Work out the version
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(grep -o 'versionName="[^"]*"' AndroidManifest.xml | cut -d'"' -f2)
+          echo "tag=v$v" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME but the app says version $v"; exit 1
+          fi
+          if gh release view "v$v" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$v already exists - nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install Android build tools
+        if: steps.ver.outputs.skip != 'true'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq android-sdk-platform-23 aapt apksigner dalvik-exchange zipalign libandroid-json-java
-      - name: Check the tag matches the app version
-        run: |
-          v=$(grep -o 'versionName="[^"]*"' AndroidManifest.xml | cut -d'"' -f2)
-          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "::error::Tag $GITHUB_REF_NAME but the app says version $v"; exit 1; }
       - name: Run tests
+        if: steps.ver.outputs.skip != 'true'
         run: tests/run.sh
       - name: Restore the signing key
+        if: steps.ver.outputs.skip != 'true'
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
@@ -34,15 +50,21 @@ jobs:
           fi
           echo "$KEYSTORE_B64" | base64 -d > release.keystore
       - name: Build signed APK
-        run: ./build.sh
+        if: steps.ver.outputs.skip != 'true'
+        run: |
+          ./build.sh
+          apksigner verify --print-certs ES-DE-Art-Grabber.apk | grep -q 4c417dded8a9bc9213f6125e234de4e9a323301489d1894fb0547d81caffc867 \
+            || { echo "::error::APK isn't signed with the app's release key"; exit 1; }
       - name: Publish the release
+        if: steps.ver.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
-          notes="release-notes/$GITHUB_REF_NAME.md"
-          [ -f "$notes" ] || { echo "Version ${GITHUB_REF_NAME#v}" > /tmp/notes.md; notes=/tmp/notes.md; }
-          gh release create "$GITHUB_REF_NAME" ES-DE-Art-Grabber.apk \
-            --title "ES-DE Art Grabber ${GITHUB_REF_NAME#v}" --notes-file "$notes"
+          notes="release-notes/$TAG.md"
+          [ -f "$notes" ] || { echo "Version ${TAG#v}" > /tmp/notes.md; notes=/tmp/notes.md; }
+          gh release create "$TAG" ES-DE-Art-Grabber.apk --target "$GITHUB_SHA" \
+            --title "ES-DE Art Grabber ${TAG#v}" --notes-file "$notes"
       - name: Remove the key from the runner
         if: always()
         run: rm -f release.keystore
