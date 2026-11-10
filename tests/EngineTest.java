@@ -91,16 +91,22 @@ public class EngineTest {
         // ---- Android app / emulator marquees
         touch("ROMs/androidapps/RetroArch.app", "com.retroarch\n");
         touch("ROMs/androidapps/Removed App.app", "com.not.installed");
+        // ES-DE's own importer style: the file doesn't name the package; there's also a PC game "Chrome"
+        touch("ROMs/androidapps/Chrome.app", "");
+        touch("ROMs/emulators/Mystery Tool.app", "");
         touch("ROMs/androidapps/systeminfo.txt", "Supported file extensions:\n.foo\n");
         touch("ROMs/emulators/Dolphin Emulator.app", "org.dolphinemu.dolphinemu");
         touch("ROMs/emulators/com.github.stenzek.duckstation.app", "");
         touch("ROMs/androidgames/Stardew Valley.app", "com.chucklefish.stardewvalley");
         final Set<String> installed = new HashSet<>(Arrays.asList("com.retroarch","org.dolphinemu.dolphinemu","com.chucklefish.stardewvalley","com.github.stenzek.duckstation"));
         Fake.DB.put("Stardew Valley", 7L);
+        Fake.DB.put("Chrome", 66L);
+        Fake.DB.put("Mystery Tool", 67L);
         Engine e2 = new Engine(roms, esde, media);
         e2.libretro = null; e2.steam = null;   // these tests cover SteamGridDB only
         e2.appArt = new Engine.AppArt() {
             public boolean isInstalled(String p) { return installed.contains(p); }
+            public String packageForLabel(String label) { return Names.norm(label).equals("chrome") ? "com.android.chrome" : null; }
             public boolean saveMarquee(String p, File d) throws IOException { try (Writer w = new FileWriter(d)) { w.write("icon:" + p); } return true; } };
         o = new Engine.Options(); o.systems = new HashSet<>(Arrays.asList("androidapps","emulators","androidgames"));
         Fake f3 = new Fake(); r = e2.run(f3, o, l);
@@ -123,7 +129,20 @@ public class EngineTest {
         check(read(M+"emulators/marquees/Dolphin Emulator.png").equals("icon:org.dolphinemu.dolphinemu"), "emulator marquee");
         check(exists(M+"emulators/marquees/com.github.stenzek.duckstation.png"), "package-as-filename fallback");
         check(read(M+"androidgames/marquees/Stardew Valley.png").startsWith("icon:") && read(M+"androidgames/covers/Stardew Valley.png").contains("grids/7"), "android game: icon marquee + SteamGridDB cover");
-        check(r.misses.size()==1 && r.misses.get(0).game.base().equals("Removed App"), "uninstalled app reported as unmatched");
+        check(r.misses.isEmpty(), "apps never end up in 'fix unmatched' (that would search game databases)");
+        check(read(M+"androidapps/covers/Chrome.png").equals("icon:com.android.chrome"), "Chrome found by its name, gets its own icon");
+        check(!new File(R,M+"androidapps/fanart/Chrome.png").exists() && !new File(R,M+"androidapps/fanart/Chrome.jpg").exists(), "Chrome browser gets no fanart from the 2003 game");
+        check(!new File(R,M+"androidapps/covers/Removed App.png").exists() && !new File(R,M+"emulators/fanart/Mystery Tool.png").exists()
+              && !new File(R,M+"emulators/covers/Mystery Tool.png").exists(), "apps not on the device get no game art at all");
+        check(r.appSkipped == 2, "skipped apps counted: " + r.appSkipped);
+        touch(M+"androidapps/fanart/Removed App.jpg", "wrong game art");
+        touch(M+"emulators/titlescreens/Mystery Tool.png", "wrong game art");
+        touch(M+"androidgames/fanart/Stardew Valley.png", "real game fanart");
+        List<File> wrong = e2.appGameArt(true);
+        check(wrong.size() == 3 && exists(M+"androidapps/fanart/Removed App.jpg"), "clear-game-art preview lists all 3 (incl. the emulator back cover), deletes nothing");
+        e2.appGameArt(false);
+        check(!exists(M+"androidapps/fanart/Removed App.jpg") && !exists(M+"emulators/titlescreens/Mystery Tool.png"), "game art removed from apps");
+        check(exists(M+"androidgames/fanart/Stardew Valley.png") && exists(M+"androidapps/covers/Chrome.png"), "android games' fanart and app icons untouched");
         r = e2.run(new Fake(), o, l);
         check(r.saved == 0, "second run leaves app marquees alone");
         o.appMarquees = false; o.overwrite = true; o.systems = new HashSet<>(Arrays.asList("emulators"));

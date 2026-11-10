@@ -62,6 +62,8 @@ public class Engine {
     /** Supplies artwork for apps installed on the device (implemented with PackageManager on Android). */
     public interface AppArt {
         boolean isInstalled(String pkg);
+        /** Package of the installed app whose name matches this label ("Chrome" -> com.android.chrome), or null. */
+        String packageForLabel(String label);
         /** Writes the app's banner/logo/icon as a PNG. Returns false if the app has no usable art. */
         boolean saveMarquee(String pkg, File dest) throws IOException;
     }
@@ -101,7 +103,7 @@ public class Engine {
     }
 
     public static class Result {
-        public int games, matched, saved, kept, noMatch, noArt, failed, appEntries, cleaned;
+        public int games, matched, saved, kept, noMatch, noArt, failed, appEntries, cleaned, appSkipped;
         public final List<Miss> misses = new ArrayList<Miss>();
         public String fatal;
     }
@@ -372,7 +374,10 @@ public class Engine {
      * The installed Android package an entry points at, if any. Third-party importers write
      * "<App Name>.app" files containing the package name; as a fallback the file name itself may be one.
      */
-    String installedPackage(GameFile g) {
+    String installedPackage(GameFile g) { return installedPackage(g, null); }
+
+    /** Also tries the app's name (file name, or ES-DE title) – for entries that don't store a package name. */
+    String installedPackage(GameFile g, String title) {
         File f = new File(sysDir(g.system), g.rel);
         if (f.isFile() && f.length() > 0 && f.length() <= 1024) {
             String text = readSmall(f, 1024);
@@ -386,7 +391,10 @@ public class Engine {
         }
         String base = g.base();
         if (PACKAGE.matcher(base).matches() && appArt.isInstalled(base)) return base;
-        return null;
+        String byName = appArt.packageForLabel(base);
+        if (byName == null && title != null) byName = appArt.packageForLabel(title);
+        if (byName == null) byName = appArt.packageForLabel(Names.clean(base));
+        return byName;
     }
 
     static final Pattern[] STEAM_ID = {
@@ -474,10 +482,17 @@ public class Engine {
         String base = g.base();
         if (g.rel.toLowerCase(Locale.ROOT).endsWith(".app") || APP_SYSTEMS.contains(g.system.toLowerCase(Locale.ROOT))
                 || g.system.equalsIgnoreCase("androidgames")) res.appEntries++;
-        // Android apps & emulators: the app's own art becomes every image type except the background
-        if (o.appMarquees && appArt != null && !g.isDir && APP_SYSTEMS.contains(g.system.toLowerCase(Locale.ROOT))) {
-            String appPkg = installedPackage(g);
+        String title = names == null ? null : names.get(normPath(g.rel));
+
+        // Android apps & emulators aren't games: never search game databases for them (a "Chrome" browser
+        // would otherwise get the 2003 game Chrome). Their own icon becomes every image except the background.
+        if (APP_SYSTEMS.contains(g.system.toLowerCase(Locale.ROOT))) {
+            String appPkg = o.appMarquees && appArt != null && !g.isDir ? installedPackage(g, title) : null;
             if (appPkg != null) { doAppEntry(o, l, res, g, appPkg); return; }
+            res.appSkipped++;
+            l.log("  · " + base + "  – " + (o.appMarquees ? "app not found on this device" : "app icons are switched off")
+                    + "; skipped (apps never get game art)");
+            return;
         }
 
         List<String> todo = new ArrayList<String>();
@@ -492,7 +507,7 @@ public class Engine {
         if (todo.isEmpty()) { l.log("  ✓ " + base + "  (already has art)"); return; }
 
         // Android games: the app's own artwork becomes the logo; SteamGridDB supplies the rest
-        String pkg = o.appMarquees && appArt != null && !g.isDir ? installedPackage(g) : null;
+        String pkg = o.appMarquees && appArt != null && !g.isDir ? installedPackage(g, title) : null;
         if (pkg != null) {
             List<String> got = new ArrayList<String>();
             if (todo.remove("marquees")) {
@@ -674,6 +689,29 @@ public class Engine {
 
     /** Folders version 1.8 also filled; identical copies there are cleaned up. */
     static final String[] APP_ICON_DROPPED = {"titlescreens", "3dboxes", "backcovers", "physicalmedia"};
+
+    /** Folders an app's icon never fills, so anything in them for an app entry came from a game database. */
+    static final String[] APP_NO_ICON_MEDIA = {"fanart", "titlescreens", "3dboxes", "backcovers", "physicalmedia"};
+
+    /**
+     * Finds (and unless dryRun, deletes) images in the app systems that an earlier version took from game
+     * databases: backgrounds and the other types app icons never fill. Only files named after an entry are touched.
+     */
+    public List<File> appGameArt(boolean dryRun) {
+        List<File> out = new ArrayList<File>();
+        for (String sys : systems()) {
+            if (!APP_SYSTEMS.contains(sys.toLowerCase(Locale.ROOT))) continue;
+            for (GameFile g : scanSystem(sys)) {
+                for (String m : APP_NO_ICON_MEDIA) {
+                    File f = existing(mediaFolder(g, m), g.base());
+                    if (f == null) continue;
+                    out.add(f);
+                    if (!dryRun) f.delete();
+                }
+            }
+        }
+        return out;
+    }
 
     void doAppEntry(Options o, Listener l, Result res, GameFile g, String pkg) throws IOException {
         String base = g.base();

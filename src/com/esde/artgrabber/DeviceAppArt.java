@@ -31,6 +31,29 @@ public class DeviceAppArt implements Engine.AppArt {
         }
     }
 
+    /** Normalised app name -> package, for launchable apps (built once). */
+    private java.util.Map<String, String> byLabel;
+
+    @Override
+    public synchronized String packageForLabel(String label) {
+        if (label == null) return null;
+        if (byLabel == null) {
+            byLabel = new java.util.HashMap<String, String>();
+            java.util.List<ApplicationInfo> apps;
+            try { apps = pm.getInstalledApplications(0); } catch (RuntimeException e) { apps = new java.util.ArrayList<ApplicationInfo>(); }
+            for (ApplicationInfo ai : apps) {
+                // only apps you can open from the launcher, so system components don't match by accident
+                if (pm.getLaunchIntentForPackage(ai.packageName) == null
+                        && pm.getLeanbackLaunchIntentForPackage(ai.packageName) == null) continue;
+                String name;
+                try { name = String.valueOf(pm.getApplicationLabel(ai)); } catch (RuntimeException e) { continue; }
+                String k = Names.norm(name);
+                if (k.length() > 0 && !byLabel.containsKey(k)) byLabel.put(k, ai.packageName);
+            }
+        }
+        return byLabel.get(Names.norm(label));
+    }
+
     @Override
     public boolean saveMarquee(String pkg, File dest) throws IOException {
         ApplicationInfo ai;

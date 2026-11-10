@@ -312,10 +312,19 @@ public class MainActivity extends Activity {
         m.addView(appIconBox);
         TextView appHelp = text("For apps you've imported into ES-DE: in the androidapps and emulators systems, "
                 + "each app's own icon from your device becomes its cover, logo, screenshot and mix image "
-                + "(never the background). Android games get the icon as their "
+                + "(never the background), and they are never searched as games. Android games get the icon as their "
                 + "logo, plus covers and backgrounds from SteamGridDB. Just keep those systems selected.", 12, MUTED, false);
         appHelp.setPadding(dp(38), 0, dp(6), dp(6));
         m.addView(appHelp);
+        Button clearAppArt = button("Clear game art from apps…", false);
+        clearAppArt.setTextSize(13);
+        LinearLayout.LayoutParams cap = new LinearLayout.LayoutParams(-2, -2);
+        cap.leftMargin = dp(38);
+        cap.bottomMargin = dp(8);
+        m.addView(clearAppArt, cap);
+        clearAppArt.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { clearAppGameArt(); }
+        });
         appIconBox.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
             public void onCheckedChanged(android.widget.CompoundButton b, boolean c) { saveSettings(); }
         });
@@ -935,6 +944,7 @@ public class MainActivity extends Activity {
                 + r.saved + (dry ? " images would be saved" : " images saved")
                 + (r.noMatch > 0 ? " · " + r.noMatch + " not found" : "")
                 + (r.cleaned > 0 ? " · " + r.cleaned + " unneeded copies removed" : "")
+                + (r.appSkipped > 0 ? " · " + r.appSkipped + " apps not found on this device" : "")
                 + (r.failed > 0 ? " · " + r.failed + " errors" : "");
         statusText.setText(s);
         appendLog("\n" + s + (dry ? "\nLooks right? Tap Download art."
@@ -1093,6 +1103,39 @@ public class MainActivity extends Activity {
                 });
             }
         }).start();
+    }
+
+    /** Removes backgrounds etc. that older versions took from game databases for app entries. */
+    void clearAppGameArt() {
+        if (!canUseStorage()) { refreshAccessCard(); toast("Allow file access first."); return; }
+        if (mediaDir == null) { toast("Set the ES-DE media folder first."); return; }
+        final Engine e = newEngine();
+        final List<File> found = e.appGameArt(true);
+        if (found.isEmpty()) {
+            toast("Nothing to clear: no backgrounds or other game art on your Android apps or emulators.");
+            return;
+        }
+        StringBuilder list = new StringBuilder();
+        for (int i = 0; i < Math.min(12, found.size()); i++) {
+            File f = found.get(i);
+            list.append("• ").append(f.getParentFile().getParentFile().getName()).append(" / ")
+                    .append(f.getParentFile().getName()).append(" / ").append(f.getName()).append('\n');
+        }
+        if (found.size() > 12) list.append("…and ").append(found.size() - 12).append(" more\n");
+        dialog().setTitle("Remove " + found.size() + " image" + (found.size() == 1 ? "" : "s") + "?")
+                .setMessage("Backgrounds, title screens, 3D boxes, back covers and disc images on your Android apps "
+                        + "and emulators. App icons never fill these, so they came from game databases (like the "
+                        + "game \"Chrome\" on the Chrome browser).\n\n" + list
+                        + "\nTip: afterwards, select only androidapps and emulators, tick \"Replace art that already "
+                        + "exists\" and run once, so any wrong covers and logos are replaced with the app icons too.")
+                .setPositiveButton("Remove", new DialogInterface.OnClickListener() {
+                    public void onClick(DialogInterface d, int w) {
+                        int n = e.appGameArt(false).size();
+                        appendLog("  − removed " + n + " game image" + (n == 1 ? "" : "s") + " from Android apps & emulators");
+                        toast("Removed " + n + " image" + (n == 1 ? "" : "s") + ". Restart ES-DE to see the change.");
+                    }
+                })
+                .setNegativeButton("Cancel", null).show();
     }
 
     // ================================================================= app updates
