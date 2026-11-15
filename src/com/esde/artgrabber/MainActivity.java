@@ -221,9 +221,9 @@ public class MainActivity extends Activity {
         left.setOrientation(LinearLayout.VERTICAL);
         leftScroll.addView(left);
 
-        TextView title = text("ES-DE Art Grabber", 24, TEXT, true);
+        TextView title = text("ES-DE Commander", 24, TEXT, true);
         left.addView(title);
-        TextView sub = text("Box art, logos and backgrounds from SteamGridDB, saved straight into ES-DE.", 14, MUTED, false);
+        TextView sub = text("Artwork for your games and apps, and your own ES-DE categories.", 14, MUTED, false);
         sub.setPadding(0, dp(2), 0, dp(14));
         left.addView(sub);
 
@@ -360,6 +360,19 @@ public class MainActivity extends Activity {
         s.addView(chooseSys, new LinearLayout.LayoutParams(-1, -2));
         chooseSys.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { chooseSystems(); }
+        });
+
+        // categories
+        LinearLayout cat = card(left, "Categories");
+        TextView catHelp = text("Make your own ES-DE systems and collections: sort Android apps into categories like "
+                + "Streaming or Tools, add a Moonlight category that opens your PC games directly, or group "
+                + "entries into collections. No files or XML to edit.", 14, MUTED, false);
+        catHelp.setPadding(0, dp(6), 0, dp(10));
+        cat.addView(catHelp);
+        Button catBtn = button("Open categories…", true);
+        cat.addView(catBtn, new LinearLayout.LayoutParams(-1, -2));
+        catBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { new CategoriesScreen(MainActivity.this).open(); }
         });
 
         // manual mode
@@ -755,6 +768,10 @@ public class MainActivity extends Activity {
     Engine newEngine() {
         Engine e = new Engine(romDir, esdeDir, mediaDir, Engine.discoverSystems(romDir, esdeDir, storageRoots()));
         e.libretro = new Libretro(getCacheDir());   // remembers each system's image list for a week
+        if (esdeDir != null && romDir != null) {
+            for (EsdeConfig.Category c : new EsdeConfig(esdeDir, romDir).categories())
+                if (EsdeConfig.KIND_APPS.equals(c.kind)) e.extraAppSystems.add(c.name.toLowerCase(java.util.Locale.ROOT));
+        }
         return e;
     }
 
@@ -1138,6 +1155,11 @@ public class MainActivity extends Activity {
                 .setNegativeButton("Cancel", null).show();
     }
 
+    /** A new category's system joins the art grabber's system selection (if you've narrowed it down). */
+    void includeSystem(String name) {
+        if (chosenSystems != null && chosenSystems.add(name)) { saveSettings(); updateLabels(); }
+    }
+
     // ================================================================= app updates
 
     String myVersion() {
@@ -1223,7 +1245,7 @@ public class MainActivity extends Activity {
                                 startActivity(new Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES",
                                         Uri.parse("package:" + getPackageName())));
                             } catch (Exception e) {
-                                toast("Allow installing unknown apps for ES-DE Art Grabber in Android settings.");
+                                toast("Allow installing unknown apps for ES-DE Commander in Android settings.");
                             }
                         }
                     })

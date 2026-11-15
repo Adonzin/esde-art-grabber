@@ -47,7 +47,7 @@ public class Engine {
      * systeminfo.txt once, so an older one may not list extensions newer ES-DE versions support.
      */
     static final Set<String> MARKER_EXTS = new HashSet<String>(Arrays.asList(
-            ".epic", ".gog", ".steam", ".amazon", ".pcgame", ".desktop", ".app"));
+            ".epic", ".gog", ".steam", ".amazon", ".pcgame", ".desktop", ".app", ".moonlight"));
     static final Set<String> IGNORE_DIRS = new HashSet<String>(Arrays.asList(
             "media", "images", "videos", "downloaded_images", "downloaded_media", "manuals",
             "snap", "snaps", "boxart", "_to_delete"));
@@ -115,6 +115,13 @@ public class Engine {
     public final Map<String, File> systemDirs;
     public volatile boolean stop = false;
     public AppArt appArt;
+    /** Android app categories made in the Categories screen: treated exactly like androidapps. */
+    public Set<String> extraAppSystems = new HashSet<String>();
+
+    boolean isAppSystem(String system) {
+        String s = system.toLowerCase(Locale.ROOT);
+        return APP_SYSTEMS.contains(s) || extraAppSystems.contains(s);
+    }
     public Libretro libretro = new Libretro(null);
     public SteamArt steam = new SteamArt();
 
@@ -480,13 +487,13 @@ public class Engine {
     void doGame(Sgdb api, Options o, Listener l, Result res, GameFile g, Map<String, String> names) throws IOException {
         res.games++;
         String base = g.base();
-        if (g.rel.toLowerCase(Locale.ROOT).endsWith(".app") || APP_SYSTEMS.contains(g.system.toLowerCase(Locale.ROOT))
+        if (g.rel.toLowerCase(Locale.ROOT).endsWith(".app") || isAppSystem(g.system)
                 || g.system.equalsIgnoreCase("androidgames")) res.appEntries++;
         String title = names == null ? null : names.get(normPath(g.rel));
 
         // Android apps & emulators aren't games: never search game databases for them (a "Chrome" browser
         // would otherwise get the 2003 game Chrome). Their own icon becomes every image except the background.
-        if (APP_SYSTEMS.contains(g.system.toLowerCase(Locale.ROOT))) {
+        if (isAppSystem(g.system)) {
             String appPkg = o.appMarquees && appArt != null && !g.isDir ? installedPackage(g, title) : null;
             if (appPkg != null) { doAppEntry(o, l, res, g, appPkg); return; }
             res.appSkipped++;
@@ -700,7 +707,7 @@ public class Engine {
     public List<File> appGameArt(boolean dryRun) {
         List<File> out = new ArrayList<File>();
         for (String sys : systems()) {
-            if (!APP_SYSTEMS.contains(sys.toLowerCase(Locale.ROOT))) continue;
+            if (!isAppSystem(sys)) continue;
             for (GameFile g : scanSystem(sys)) {
                 for (String m : APP_NO_ICON_MEDIA) {
                     File f = existing(mediaFolder(g, m), g.base());

@@ -1,6 +1,30 @@
-# ES-DE Art Grabber
+# ES-DE Commander
 
-An Android app that downloads box art, logos and backgrounds and saves them straight into [ES-DE](https://es-de.org)'s media folders. It's made for handhelds like the Retroid Pocket and works with a controller.
+An Android companion app for [ES-DE](https://es-de.org), made for handhelds like the Retroid Pocket and fully usable with a controller. It does two jobs:
+
+- **Artwork:** downloads box art, logos and backgrounds and saves them straight into ES-DE's media folders.
+- **Categories:** makes your own ES-DE systems and collections (Android app categories, a Moonlight category for your PC games, collections) without editing XML or folders.
+
+(Formerly *ES-DE Art Grabber*. Updates install over the old app.)
+
+## Categories
+
+| Kind | What it makes | Example |
+|---|---|---|
+| **Android app category** | A new system on ES-DE's main screen, with the apps you tick | *Streaming*: Netflix, YouTube, Plex |
+| **Moonlight category** | A system whose entries open a game on your PC through Moonlight, directly | *Moonlight*: Cyberpunk 2077, Desktop |
+| **Collection** | An ES-DE custom collection of entries you already have, optionally as its own item | *Media*: VLC, Kodi, Plex |
+
+How it works under the hood:
+- App and Moonlight categories are written to `ES-DE/custom_systems/es_systems.xml` (Moonlight also adds an emulator rule to `es_find_rules.xml`), with each category's entries in its own folder in your ROMs folder.
+- App categories use ES-DE's own Android Apps launch method: each `.app` file holds an app's package name.
+- Moonlight entries launch Moonlight's shortcut screen with the computer's name and the game's name, so each entry must be named exactly like the game in Moonlight.
+- Collections are `ES-DE/collections/custom-<name>.cfg`, switched on in `es_settings.xml`.
+- Entries this app made are marked `<!-- ES-DE Commander -->`. Systems, rules and files you made yourself are never changed, and ES-DE's own system names can't be reused.
+- Every change is backed up first (`ES-DE/commander/backups`), and **Undo last change** puts back every file it touched.
+- Close ES-DE before making changes: it reads these files when it starts.
+
+## Artwork
 
 It uses three sources, none of which ES-DE's built-in scrapers cover:
 
@@ -24,7 +48,7 @@ ES-DE's built-in scrapers (ScreenScraper and TheGamesDB) often have nothing for 
 - **Preview first:** see every match before anything is saved.
 - **Fix unmatched:** search for the right game yourself, then download automatically or choose images.
 - **Pick art by hand:** browse every SteamGridDB image for a game as thumbnails and choose your own.
-- **Android apps and emulators:** each app's own icon becomes its cover, logo, screenshot and mix image (never the background). It's saved at 256 px to keep files small.
+- **Android apps and emulators:** each app's own icon becomes its cover, logo, screenshot and mix image (never the background), at 256 px to keep files small. Apps are never searched as games. App categories made here are treated the same way.
 - **Update app button:** checks this repository's releases and installs a newer version for you.
 - **Never re-downloads:** art you already have is skipped unless you choose to replace it.
 
@@ -61,7 +85,9 @@ tests/run.sh        # engine tests on the desktop JVM, incl. a fake SteamGridDB 
 | `src/com/esde/artgrabber/SteamArt.java` | Official Steam images by app ID |
 | `src/com/esde/artgrabber/Updater.java`, `UpdateProvider.java` | In-app updates from GitHub releases |
 | `src/com/esde/artgrabber/Names.java` | ROM-name cleanup and fuzzy matching |
-| `src/com/esde/artgrabber/MainActivity.java` | The app's screens |
+| `src/com/esde/artgrabber/MainActivity.java` | The main screen |
+| `src/com/esde/artgrabber/EsdeConfig.java` | Writes ES-DE's custom systems, find rules, collections and settings, with backups and undo. No Android code, tested on a desktop. |
+| `src/com/esde/artgrabber/CategoriesScreen.java` | The Categories screen |
 | `src/com/esde/artgrabber/DeviceAppArt.java` | Turns installed apps' icons into images |
 | `tests/` | Desktop tests |
 | `tools/sgdb_esde.py` | The original command-line version, for Termux or a PC |
