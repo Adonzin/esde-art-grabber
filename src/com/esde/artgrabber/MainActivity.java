@@ -87,6 +87,7 @@ public class MainActivity extends Activity {
     volatile Engine engine;
     Thread worker;
     final ThumbLoader thumbs = new ThumbLoader();
+    TextView themeText;
     TextView updateText;
     Button updateBtn;
     Updater.Release pendingUpdate;
@@ -362,6 +363,17 @@ public class MainActivity extends Activity {
             public void onClick(View v) { chooseSystems(); }
         });
 
+        // themes
+        LinearLayout th = card(left, "Themes");
+        themeText = text("", 14, MUTED, false);
+        themeText.setPadding(0, dp(6), 0, dp(10));
+        th.addView(themeText);
+        Button thBtn = button("Open themes…", true);
+        th.addView(thBtn, new LinearLayout.LayoutParams(-1, -2));
+        thBtn.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { new ThemesScreen(MainActivity.this).open(); }
+        });
+
         // categories
         LinearLayout cat = card(left, "Categories");
         TextView catHelp = text("Make your own ES-DE systems and collections: sort Android apps into categories like "
@@ -552,6 +564,12 @@ public class MainActivity extends Activity {
     }
 
     void updateLabels() {
+        if (themeText != null) {
+            String cur = esdeDir == null ? null : new ThemeCopies(esdeDir).currentTheme();
+            themeText.setText(cur == null ? "Give your categories their own artwork in an editable copy of your ES-DE theme."
+                    : "ES-DE is using " + cur + (ThemeCopies.isCopy(cur) ? " (your editable copy)." : ". Make an editable copy to give "
+                    + "your categories their own artwork."));
+        }
         String key = prefs.getString("key", "");
         if (key.length() == 0) {
             keyStatus.setText("Not set yet — you need a free key from SteamGridDB.");
@@ -1153,6 +1171,63 @@ public class MainActivity extends Activity {
                     }
                 })
                 .setNegativeButton("Cancel", null).show();
+    }
+
+    // ================================================================= picture picking
+
+    interface PictureCallback { void got(byte[] data, String name); }
+
+    private PictureCallback pendingPicture;
+    static final int PICK_PICTURE = 77;
+
+    /** Opens Android's picture picker (gallery, files, cloud...) and hands back the chosen picture. */
+    void pickPicture(PictureCallback cb) {
+        pendingPicture = cb;
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("image/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(i, "Choose a picture"), PICK_PICTURE);
+        } catch (Exception e) {
+            pendingPicture = null;
+            toast("No app for choosing pictures was found.");
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != PICK_PICTURE) return;
+        final PictureCallback cb = pendingPicture;
+        pendingPicture = null;
+        if (cb == null || result != RESULT_OK || data == null || data.getData() == null) return;
+        final Uri uri = data.getData();
+        new Thread(new Runnable() {
+            public void run() {
+                byte[] bytes = null;
+                String name = "picture";
+                try {
+                    android.database.Cursor q = getContentResolver().query(uri, null, null, null, null);
+                    if (q != null) {
+                        int col = q.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                        if (q.moveToFirst() && col >= 0) name = q.getString(col);
+                        q.close();
+                    }
+                    java.io.InputStream in = getContentResolver().openInputStream(uri);
+                    if (in != null) bytes = ThumbLoader.readAll(in);
+                } catch (Exception e) {
+                    bytes = null;
+                }
+                final byte[] fb = bytes;
+                final String fn = name;
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (fb == null || fb.length == 0) toast("That picture couldn't be opened.");
+                        else cb.got(fb, fn);
+                    }
+                });
+            }
+        }).start();
     }
 
     /** A new category's system joins the art grabber's system selection (if you've narrowed it down). */

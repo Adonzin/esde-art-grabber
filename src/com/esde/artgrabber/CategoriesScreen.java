@@ -152,11 +152,14 @@ class CategoriesScreen {
     private void categoryMenu(final EsdeConfig.Category c) {
         final boolean collection = EsdeConfig.KIND_COLLECTION.equals(c.kind);
         String change = EsdeConfig.KIND_APPS.equals(c.kind) ? "Choose apps" : EsdeConfig.KIND_MOONLIGHT.equals(c.kind) ? "Edit games" : "Choose entries";
-        String[] items = collection ? new String[]{change, "Delete"} : new String[]{change, "Rename or change look", "Delete"};
+        final String[] items = collection ? new String[]{change, "Custom look…", "Delete"}
+                : new String[]{change, "Custom look…", "Rename or change look", "Delete"};
         a.dialog().setTitle(c.fullName).setItems(items, new DialogInterface.OnClickListener() {
             public void onClick(DialogInterface d, int w) {
+                String pick = items[w];
                 if (w == 0) editItems(c);
-                else if (w == 1 && !collection) editDetails(c, c.kind);
+                else if (pick.startsWith("Custom look")) new LookEditor(a, c, new Runnable() { public void run() { refresh(); } }).open();
+                else if (pick.startsWith("Rename")) editDetails(c, c.kind);
                 else confirmDelete(c);
             }
         }).setNegativeButton("Close", null).show();
@@ -166,7 +169,8 @@ class CategoriesScreen {
 
     static final String[][] LOOKS = {
             {"androidapps", "Android Apps look"}, {"androidgames", "Android Games look"}, {"emulators", "Emulators look"},
-            {"windows", "Windows / PC look"}, {"steam", "Steam look"}, {"epic", "Epic Games look"}, {"", "Plain (just the name)"}};
+            {"windows", "Windows / PC look"}, {"steam", "Steam look"}, {"epic", "Epic Games look"},
+            {"", "Its own look (just the name, or your custom look)"}};
 
     /** Step 1 for new categories, or rename/look for existing ones. */
     private void editDetails(final EsdeConfig.Category existing, final String kind) {
@@ -205,7 +209,7 @@ class CategoriesScreen {
             lp.topMargin = a.dp(10);
             wrap.addView(lookBtn, lp);
             wrap.addView(a.text("Your ES-DE theme only has artwork for its own systems, so a category borrows one of their looks. "
-                    + "\"Plain\" shows just the name, if your theme supports that.", 12, MainActivity.MUTED, false));
+                    + "\"Its own look\" shows just the name, or the pictures you add under Custom look in an editable theme copy.", 12, MainActivity.MUTED, false));
             lookBtn.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     String[] labels = new String[LOOKS.length];
@@ -500,7 +504,11 @@ class CategoriesScreen {
                     public void onClick(DialogInterface d, int w) {
                         final EsdeConfig cfg = cfg();
                         save("Deleting…", new Job() {
-                            public String run() throws IOException { cfg.delete(c); return "Deleted \"" + c.fullName + "\"."; }
+                            public String run() throws IOException {
+                                cfg.delete(c);
+                                new CategoryLooks(a.esdeDir).forget(c.name);   // its pictures in theme copies go too
+                                return "Deleted \"" + c.fullName + "\".";
+                            }
                         });
                     }
                 })

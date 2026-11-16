@@ -24,6 +24,18 @@ How it works under the hood:
 - Every change is backed up first (`ES-DE/commander/backups`), and **Undo last change** puts back every file it touched.
 - Close ES-DE before making changes: it reads these files when it starts.
 
+## Themes and custom looks
+
+ES-DE themes only have artwork for ES-DE's own systems, so new categories normally borrow another system's look or show just their name. ES-DE Commander can give them their own:
+
+1. **Make an editable copy** of your theme (Themes screen). ES-DE on Android keeps downloaded themes in its private storage, so the app downloads the same theme again from the source ES-DE's theme downloader uses ([themes-list](https://gitlab.com/es-de/themes/themes-list)), into `ES-DE/themes/<theme>-escommander`, named "*<Theme> (ESCommander)*". Your original theme isn't touched. **Refresh copy** downloads the latest version and puts your custom looks back.
+2. **Custom look** (category menu): choose a main picture, a logo and a background. Each can be a picture file or an installed app's icon. App icons on big tiles sit centred on a colour you pick, so they aren't cut off.
+3. Choose the ESCommander theme in ES-DE: *UI Settings → Theme*.
+
+How the app knows where pictures go: `ThemeLayout` reads the theme's XML and finds every path that contains `${system.theme}`, directly or through variables that change with the theme's variants and colour schemes. Each one becomes a slot with a role (carousel tile, logo, name logo, background, system info...) and the size and format of the same file for a similar system (normally Android Apps). `ThemeArtPlan` then draws each picture to fit: cropped to fill for tiles, fitted on transparency for logos. SVG slots get an SVG wrapping the picture; ES-DE's SVG renderer, LunaSVG 3.5, draws embedded images. The category also gets its own copy of the theme's system info, with its name and description, the original colours, and none of the other system's facts. Files the theme already has are never overwritten, and everything a look writes is recorded so it can be replaced or removed cleanly.
+
+Checked against PS5 Menu, Linear, Modern, Slate, Canvas, Iconic, Art Book Next and NSO Menu (`THEMES_DIR=/path/to/themes tests/run.sh`).
+
 ## Artwork
 
 It uses three sources, none of which ES-DE's built-in scrapers cover:
@@ -88,6 +100,9 @@ tests/run.sh        # engine tests on the desktop JVM, incl. a fake SteamGridDB 
 | `src/com/esde/artgrabber/MainActivity.java` | The main screen |
 | `src/com/esde/artgrabber/EsdeConfig.java` | Writes ES-DE's custom systems, find rules, collections and settings, with backups and undo. No Android code, tested on a desktop. |
 | `src/com/esde/artgrabber/CategoriesScreen.java` | The Categories screen |
+| `src/com/esde/artgrabber/ThemeLayout.java`, `ThemeArtPlan.java` | Finding where a theme keeps per-system art, and planning a category's files |
+| `src/com/esde/artgrabber/ThemeCopies.java`, `CategoryLooks.java` | Theme copies and custom looks |
+| `src/com/esde/artgrabber/ThemesScreen.java`, `LookEditor.java`, `LookRenderer.java` | Their screens and on-device drawing |
 | `src/com/esde/artgrabber/DeviceAppArt.java` | Turns installed apps' icons into images |
 | `tests/` | Desktop tests |
 | `tools/sgdb_esde.py` | The original command-line version, for Termux or a PC |

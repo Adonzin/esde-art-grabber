@@ -6,9 +6,9 @@ cd "$(dirname "$0")/.."
 JSON=/usr/share/java/com.android.json.jar
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/out" "$WORK/lib" "$WORK/lib2" "$WORK/lib3" "$WORK/lib4" "$WORK/lib5" "$WORK/lib6"
+mkdir -p "$WORK/out" "$WORK/lib" "$WORK/lib2" "$WORK/lib3" "$WORK/lib4" "$WORK/lib5" "$WORK/lib6" "$WORK/lib7"
 javac -nowarn -encoding UTF-8 -d "$WORK/out" -cp "$JSON" \
-  src/com/esde/artgrabber/{Names,Sgdb,Engine,SteamArt,Libretro,Updater,EsdeConfig,BundledSystems,ThemeLayout,ThemeArtPlan}.java tests/EngineTest.java tests/com/esde/artgrabber/HttpTest.java tests/com/esde/artgrabber/SourcesTest.java tests/com/esde/artgrabber/UpdaterTest.java tests/com/esde/artgrabber/ConfigTest.java tests/com/esde/artgrabber/ThemeTest.java
+  src/com/esde/artgrabber/{Names,Sgdb,Engine,SteamArt,Libretro,Updater,EsdeConfig,BundledSystems,ThemeLayout,ThemeArtPlan,ThemeCopies,CategoryLooks}.java tests/EngineTest.java tests/com/esde/artgrabber/HttpTest.java tests/com/esde/artgrabber/SourcesTest.java tests/com/esde/artgrabber/UpdaterTest.java tests/com/esde/artgrabber/ConfigTest.java tests/com/esde/artgrabber/ThemeTest.java tests/com/esde/artgrabber/LooksTest.java
 echo "== Engine tests"
 java -Dfile.encoding=UTF-8 -cp "$WORK/out:$JSON" EngineTest "$WORK/lib" | grep -E "^  ok|ALL OK"
 echo "== HTTP tests (local fake SteamGridDB server)"
@@ -24,3 +24,6 @@ echo "== Category config tests (ES-DE files)"
 java -Dfile.encoding=UTF-8 -cp "$WORK/out:$JSON" com.esde.artgrabber.ConfigTest "$WORK/lib5" | grep -E "^  ok|FAIL|TESTS OK|FAILURES"
 echo "== Theme layout tests (miniature theme; set THEMES_DIR to also check real themes)"
 java -Djava.awt.headless=true -Dfile.encoding=UTF-8 -cp "$WORK/out:$JSON" com.esde.artgrabber.ThemeTest "$WORK/lib6" ${THEMES_DIR:-} | grep -E "^  ok|FAIL|TESTS OK|FAILURES"
+echo "== Theme copy and custom look tests (GitHub/GitLab stand-in)"
+env -u HTTPS_PROXY -u HTTP_PROXY -u https_proxy -u http_proxy \
+  java -Dfile.encoding=UTF-8 -cp "$WORK/out:$JSON" com.esde.artgrabber.LooksTest "$WORK/lib7" | grep -E "^  ok|FAIL|TESTS OK|FAILURES"
