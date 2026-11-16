@@ -12,7 +12,7 @@ import java.net.URL;
 
 /** Checks the project's GitHub releases for a newer version and downloads its APK. No Android code. */
 public class Updater {
-    public static final String REPO = "Adonzin/esde-art-grabber";
+    public static final String REPO = "Adonzin/esde-Commander";
     protected String apiBase = "https://api.github.com/repos/";
 
     public static class Release {
