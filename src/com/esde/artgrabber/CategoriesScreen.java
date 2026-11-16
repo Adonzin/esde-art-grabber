@@ -152,17 +152,40 @@ class CategoriesScreen {
     private void categoryMenu(final EsdeConfig.Category c) {
         final boolean collection = EsdeConfig.KIND_COLLECTION.equals(c.kind);
         String change = EsdeConfig.KIND_APPS.equals(c.kind) ? "Choose apps" : EsdeConfig.KIND_MOONLIGHT.equals(c.kind) ? "Edit games" : "Choose entries";
+        final boolean moon = EsdeConfig.KIND_MOONLIGHT.equals(c.kind);
         final String[] items = collection ? new String[]{change, "Custom look…", "Delete"}
+                : moon ? new String[]{change, "Refresh from PC", "Custom look…", "Rename or change look", "Delete"}
                 : new String[]{change, "Custom look…", "Rename or change look", "Delete"};
         a.dialog().setTitle(c.fullName).setItems(items, new DialogInterface.OnClickListener() {
             public void onClick(DialogInterface d, int w) {
                 String pick = items[w];
                 if (w == 0) editItems(c);
+                else if (pick.equals("Refresh from PC")) refreshFromPc(c);
                 else if (pick.startsWith("Custom look")) new LookEditor(a, c, new Runnable() { public void run() { refresh(); } }).open();
                 else if (pick.startsWith("Rename")) editDetails(c, c.kind);
                 else confirmDelete(c);
             }
         }).setNegativeButton("Close", null).show();
+    }
+
+    /** Re-reads the PC's app list and saves the ones you keep ticked. */
+    private void refreshFromPc(final EsdeConfig.Category c) {
+        final EsdeConfig cfg = cfg();
+        new MoonlightImport(a).start("Refresh \"" + c.fullName + "\"", a.prefs.getString("moonlight.host." + c.name, null),
+                cfg.moonlightGames(c), new MoonlightImport.Done() {
+                    public void done(String pcName, final List<String> chosen, String host) {
+                        a.prefs.edit().putString("moonlight.host." + c.name, host).apply();
+                        c.pc = pcName;
+                        save("Saving " + c.fullName + "…", new Job() {
+                            public String run() throws IOException {
+                                int before = cfg.moonlightGames(c).size();
+                                cfg.saveMoonlightCategory(c, chosen);
+                                return "Updated \"" + c.fullName + "\": " + chosen.size() + " game" + (chosen.size() == 1 ? "" : "s")
+                                        + " (was " + before + "). Tap Download art for artwork.";
+                            }
+                        });
+                    }
+                });
     }
 
     // ================================================================ name + look
@@ -187,7 +210,7 @@ class CategoriesScreen {
         wrap.addView(name);
         final EditText pc = new EditText(a);
         if (moon) {
-            wrap.addView(a.text("Computer name, exactly as Moonlight shows it", 13, MainActivity.MUTED, false));
+            wrap.addView(a.text("Computer name, exactly as Moonlight shows it (or leave it empty and get it from your PC next)", 13, MainActivity.MUTED, false));
             pc.setSingleLine(true);
             pc.setHint("e.g. GAMING-PC");
             if (existing != null && existing.pc != null) pc.setText(existing.pc);
@@ -240,10 +263,7 @@ class CategoriesScreen {
                 if (full.isEmpty()) { a.toast("Give it a name."); return; }
                 c.fullName = full;
                 if (!col) c.theme = LOOKS[look[0]][0].isEmpty() ? c.name : LOOKS[look[0]][0];
-                if (moon) {
-                    c.pc = pc.getText().toString().trim();
-                    if (c.pc.isEmpty()) { a.toast("Enter the computer's name as Moonlight shows it."); return; }
-                }
+                if (moon) c.pc = pc.getText().toString().trim();   // may stay empty: "Get games from my PC" fills it
                 if (col) c.separate = separate.isChecked();
                 dlg.dismiss();
                 if (existing != null) saveSame(c);
@@ -333,7 +353,16 @@ class CategoriesScreen {
         LinearLayout wrap = new LinearLayout(a);
         wrap.setOrientation(LinearLayout.VERTICAL);
         wrap.setPadding(a.dp(20), a.dp(4), a.dp(20), 0);
-        wrap.addView(a.text("One game per line, spelled exactly as in Moonlight's list for " + c.pc + ".", 13, MainActivity.MUTED, false));
+        final TextView forPc = a.text("", 13, MainActivity.MUTED, false);
+        final Runnable pcLabel = new Runnable() {
+            public void run() {
+                forPc.setText(c.pc == null || c.pc.isEmpty()
+                        ? "Get the games from your PC, or type them one per line exactly as Moonlight lists them."
+                        : "One game per line, spelled exactly as in Moonlight's list for " + c.pc + ".");
+            }
+        };
+        pcLabel.run();
+        wrap.addView(forPc);
         final EditText games = new EditText(a);
         games.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
         games.setMinLines(6);
@@ -341,6 +370,28 @@ class CategoriesScreen {
         StringBuilder b = new StringBuilder();
         if (cfg.find(c.kind, c.name) != null) for (String g : cfg.moonlightGames(c)) b.append(g).append('\n');
         games.setText(b.toString());
+        Button fromPc = a.button("Get games from my PC…", true);
+        LinearLayout.LayoutParams fp = new LinearLayout.LayoutParams(-1, -2);
+        fp.bottomMargin = a.dp(6);
+        wrap.addView(fromPc, 1, fp);
+        fromPc.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                List<String> now = new ArrayList<String>();
+                for (String line : games.getText().toString().split("\\r?\\n")) if (line.trim().length() > 0) now.add(line.trim());
+                new MoonlightImport(a).start("Get games from your PC", a.prefs.getString("moonlight.host." + c.name, null), now,
+                        new MoonlightImport.Done() {
+                            public void done(String pcName, List<String> chosen, String host) {
+                                a.prefs.edit().putString("moonlight.host." + c.name, host).apply();
+                                if (c.pc == null || !c.pc.equals(pcName)) {
+                                    c.pc = pcName;
+                                    a.toast("Computer name set to \"" + pcName + "\", as Moonlight shows it.");
+                                }
+                                pcLabel.run();
+                                games.setText(android.text.TextUtils.join("\n", chosen));
+                            }
+                        });
+            }
+        });
         wrap.addView(games);
         if (a.getPackageManager().getLaunchIntentForPackage("com.limelight") == null
                 && a.getPackageManager().getLaunchIntentForPackage("com.limelight.root") == null) {

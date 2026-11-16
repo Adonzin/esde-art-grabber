@@ -19,6 +19,7 @@ How it works under the hood:
 - App and Moonlight categories are written to `ES-DE/custom_systems/es_systems.xml` (Moonlight also adds an emulator rule to `es_find_rules.xml`), with each category's entries in its own folder in your ROMs folder.
 - App categories use ES-DE's own Android Apps launch method: each `.app` file holds an app's package name.
 - Moonlight entries launch Moonlight's shortcut screen with the computer's name and the game's name, so each entry must be named exactly like the game in Moonlight.
+- **Get games from my PC** fills a Moonlight category from Sunshine/Apollo itself: hosts are found on the network over mDNS (`_nvstream._tcp`, as Moonlight does), the PC name comes from its public `/serverinfo`, and the app list from the settings server's `/api/apps`. Sunshine takes HTTP Basic login and Apollo a `/api/login` session cookie; both are tried. Only home-network addresses are allowed, and the self-signed certificate is pinned on first use.
 - Collections are `ES-DE/collections/custom-<name>.cfg`, switched on in `es_settings.xml`.
 - Entries this app made are marked `<!-- ES-DE Commander -->`. Systems, rules and files you made yourself are never changed, and ES-DE's own system names can't be reused.
 - Every change is backed up first (`ES-DE/commander/backups`), and **Undo last change** puts back every file it touched.
@@ -103,6 +104,7 @@ tests/run.sh        # engine tests on the desktop JVM, incl. a fake SteamGridDB 
 | `src/com/esde/artgrabber/ThemeLayout.java`, `ThemeArtPlan.java` | Finding where a theme keeps per-system art, and planning a category's files |
 | `src/com/esde/artgrabber/ThemeCopies.java`, `CategoryLooks.java` | Theme copies and custom looks |
 | `src/com/esde/artgrabber/ThemesScreen.java`, `LookEditor.java`, `LookRenderer.java` | Their screens and on-device drawing |
+| `src/com/esde/artgrabber/SunshineClient.java`, `MoonlightImport.java` | Reading a Sunshine/Apollo PC's app list, and its screens |
 | `src/com/esde/artgrabber/DeviceAppArt.java` | Turns installed apps' icons into images |
 | `tests/` | Desktop tests |
 | `tools/sgdb_esde.py` | The original command-line version, for Termux or a PC |
