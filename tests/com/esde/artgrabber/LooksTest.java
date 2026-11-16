@@ -47,6 +47,7 @@ public class LooksTest {
     public static void main(String[] a) throws Exception {
         final String[] version = {"1"};
         final boolean[] evil = {false};
+        final String[] cut = {""};   // "", "sized" (Content-Length says more), "stream" (no length, stops early)
         HttpServer srv = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         final String base = "http://127.0.0.1:" + srv.getAddress().getPort();
         srv.createContext("/", new HttpHandler() { public void handle(HttpExchange x) throws IOException {
@@ -61,6 +62,20 @@ public class LooksTest {
                         + "\"themesAndroid\":[{\"name\":\"Android Only\",\"reponame\":\"android-only-es-de\",\"url\":\"https://github.com/x/android-only-es-de\"}]}").getBytes();
             } else if (p.equals("/codeload/InitialDin/ps5-menu-es-de/zip/HEAD")) {
                 body = themeZip(version[0], evil[0]);
+                if (cut[0].length() > 0) {
+                    byte[] half = Arrays.copyOf(body, body.length * 2 / 3);
+                    if (cut[0].equals("sized")) {
+                        x.sendResponseHeaders(200, body.length);
+                        try { x.getResponseBody().write(half); x.getResponseBody().flush(); } catch (IOException ignored) { }
+                        x.getHttpContext().getServer();
+                        x.close();
+                        return;
+                    }
+                    x.sendResponseHeaders(200, 0);   // chunked: no length, like GitHub's archives
+                    x.getResponseBody().write(half);
+                    x.close();
+                    return;
+                }
             } else { code = 404; body = "nope".getBytes(); }
             x.sendResponseHeaders(code, body.length);
             x.getResponseBody().write(body);
@@ -156,6 +171,22 @@ public class LooksTest {
         try { tc.makeCopy(ps5, cache, null); } catch (IOException e) { refused = e.getMessage().contains("unsafe"); }
         check(refused && !new File(R, "escape.txt").exists() && !new File(esde, "escape.txt").exists() && new File(again, "theme.xml").isFile(),
                 "unsafe archive refused; existing copy untouched");
+
+        // downloads cut off part-way must fail loudly and leave the copy alone
+        evil[0] = false;
+        for (String mode : new String[]{"sized", "stream"}) {
+            cut[0] = mode;
+            boolean failed = false;
+            try { tc.makeCopy(ps5, cache, null); } catch (IOException e) { failed = true; System.out.println("    (" + mode + ": " + e.getMessage() + ")"); }
+            check(failed && EsdeConfig.read(new File(again, "VERSION")).equals("2") && tc.leftovers().isEmpty(),
+                    "cut-off download (" + mode + ") refused; copy untouched; nothing left behind");
+        }
+        cut[0] = "";
+        new File(tc.themesDir(), "ps5-menu-es-de-escommander.partial").mkdirs();
+        check(tc.leftovers().size() == 1, "leftover folders from interrupted downloads are found");
+        check(ThemeCopies.size(again) > 0, "copy size measured");
+        List<String> missing = ThemeCopies.missingArt(again, Arrays.asList("androidapps", "tools", "snes"));
+        check(missing.equals(Arrays.asList("androidapps", "snes")), "check copy: systems without a carousel image listed: " + missing);
 
         looks.forget("streaming");
         check(!tile.exists() && !outside.exists() && !new File(esde, "commander/looks/streaming").exists(), "deleting a category's look cleans up everything");

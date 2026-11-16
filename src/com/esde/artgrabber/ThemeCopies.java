@@ -4,9 +4,7 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,7 +18,7 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
+import java.util.zip.ZipFile;
 
 /**
  * Editable copies of ES-DE themes. ES-DE on Android keeps downloaded themes in its private storage, so a copy is
@@ -196,6 +194,45 @@ public class ThemeCopies {
         return dest;
     }
 
+    /** Folders left behind by an interrupted download or replacement (".partial", ".old"). */
+    public List<File> leftovers() {
+        List<File> out = new ArrayList<File>();
+        File[] ds = themesDir().listFiles();
+        if (ds == null) return out;
+        for (File d : ds) {
+            String n = d.getName();
+            if (d.isDirectory() && (n.endsWith(SUFFIX + ".partial") || n.endsWith(SUFFIX + ".old"))) out.add(d);
+        }
+        return out;
+    }
+
+    /** Disk space a folder uses. */
+    public static long size(File f) {
+        if (f.isFile()) return f.length();
+        long n = 0;
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) n += size(k);
+        return n;
+    }
+
+    /**
+     * Systems (folder names) that have no main carousel image in a theme. Lists the theme's own gaps as well as
+     * files missing from a copy, so you can see what will show the theme's placeholder instead.
+     */
+    public static List<String> missingArt(File themeDir, List<String> systems) throws IOException {
+        ThemeLayout l = ThemeLayout.read(themeDir, null);
+        List<ThemeLayout.Slot> tiles = new ArrayList<ThemeLayout.Slot>();
+        for (ThemeLayout.Slot s : l.slots) if ("tile".equals(s.role) && !s.outside && !s.custom && s.existing > 0) tiles.add(s);
+        List<String> out = new ArrayList<String>();
+        if (tiles.isEmpty()) return out;
+        for (String sys : systems) {
+            boolean found = false;
+            for (ThemeLayout.Slot s : tiles) if (s.fileFor(themeDir, themeDir, sys).isFile()) { found = true; break; }
+            if (!found) out.add(sys);
+        }
+        return out;
+    }
+
     /** Where a copy came from, or null if the folder isn't a copy made by this app. */
     public Entry sourceOf(File copy) {
         String t = EsdeConfig.read(new File(copy, MARKER));
@@ -238,15 +275,26 @@ public class ThemeCopies {
         EsdeConfig.writeBytes(caps, t.getBytes("UTF-8"));
     }
 
-    static void unzipStrippingTop(File zip, File dest, Progress p) throws IOException {
+    /**
+     * Unpacks using the zip's index (at the end of the file), so a download that was cut short can't pass as a smaller
+     * theme, and checks every file's size after writing it.
+     */
+    static int unzipStrippingTop(File zip, File dest, Progress p) throws IOException {
         if (!dest.mkdirs() && !dest.isDirectory()) throw new IOException("can't create " + dest);
         String canon = dest.getCanonicalPath() + File.separator;
-        ZipInputStream in = new ZipInputStream(new BufferedInputStream(new FileInputStream(zip)));
+        ZipFile zf;
         try {
-            ZipEntry ze;
+            zf = new ZipFile(zip);
+        } catch (IOException e) {
+            throw new IOException("The download is incomplete or damaged. Try again (a steady Wi-Fi connection helps).");
+        }
+        int count = 0;
+        try {
+            java.util.Enumeration<? extends ZipEntry> en = zf.entries();
             byte[] buf = new byte[65536];
-            long count = 0;
-            while ((ze = in.getNextEntry()) != null) {
+            int total = zf.size();
+            while (en.hasMoreElements()) {
+                ZipEntry ze = en.nextElement();
                 String name = ze.getName().replace('\\', '/');
                 int slash = name.indexOf('/');
                 if (slash < 0) continue;                       // top-level file outside the theme folder
@@ -257,18 +305,25 @@ public class ThemeCopies {
                 if (ze.isDirectory()) { f.mkdirs(); continue; }
                 File dir = f.getParentFile();
                 if (dir != null && !dir.isDirectory() && !dir.mkdirs()) throw new IOException("can't create " + dir);
+                InputStream in = zf.getInputStream(ze);
                 OutputStream out = new FileOutputStream(f);
+                long written = 0;
                 try {
                     int n;
-                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    while ((n = in.read(buf)) > 0) { out.write(buf, 0, n); written += n; }
                 } finally {
                     out.close();
+                    in.close();
                 }
-                if (p != null && (++count % 50) == 0) p.update("Unpacking", count, 0);
+                if ((ze.getSize() >= 0 && written != ze.getSize()) || f.length() != written)
+                    throw new IOException("\"" + rel + "\" didn't save completely. Is the storage full?");
+                count++;
+                if (p != null && (count % 50) == 0) p.update("Unpacking", count, total);
             }
         } finally {
-            in.close();
+            zf.close();
         }
+        return count;
     }
 
     /** False on 404 (try the next address). */
@@ -287,9 +342,9 @@ public class ThemeCopies {
             long total = c.getContentLength();
             InputStream in = c.getInputStream();
             OutputStream out = new FileOutputStream(dest);
+            long done = 0;
             try {
                 byte[] buf = new byte[65536];
-                long done = 0;
                 int n;
                 while ((n = in.read(buf)) > 0) {
                     out.write(buf, 0, n);
@@ -300,6 +355,7 @@ public class ThemeCopies {
                 out.close();
                 in.close();
             }
+            if (total > 0 && done != total) throw new IOException("The download was cut off. Try again (a steady Wi-Fi connection helps).");
             return true;
         } finally {
             c.disconnect();

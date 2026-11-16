@@ -76,12 +76,17 @@ class ThemesScreen {
                         14, MainActivity.GOOD, false));
                 if (!usingCopy) now.addView(hint("To see your custom looks, choose \"" + nameOf(copy) + "\" in ES-DE: Main menu → "
                         + "UI Settings → Theme."));
+                final TextView sizeText = a.text("", 12, MainActivity.MUTED, false);
+                now.addView(sizeText);
+                showSize(copy, sizeText);
                 LinearLayout r = a.row();
                 r.setPadding(0, a.dp(10), 0, 0);
-                Button refresh = a.button("Refresh copy", false), del = a.button("Delete copy", false);
+                Button refresh = a.button("Refresh copy", false), check = a.button("Check copy", false), del = a.button("Delete copy", false);
                 a.addWeighted(r, refresh, 1, 0);
+                a.addWeighted(r, check, 1, 8);
                 a.addWeighted(r, del, 1, 8);
                 now.addView(r);
+                check.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { checkCopy(copy); } });
                 refresh.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { download(ThemeCopies.originalOf(cur), true); } });
                 del.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { confirmDelete(copy); } });
                 layoutCard(copy);
@@ -105,7 +110,13 @@ class ThemesScreen {
             for (final File d : copies) {
                 LinearLayout r = a.row();
                 r.setPadding(0, a.dp(8), 0, 0);
-                a.addWeighted(r, a.text(nameOf(d), 14, MainActivity.TEXT, false), 1, 0);
+                LinearLayout names = new LinearLayout(a);
+                names.setOrientation(LinearLayout.VERTICAL);
+                names.addView(a.text(nameOf(d), 14, MainActivity.TEXT, false));
+                TextView sz = a.text("", 12, MainActivity.MUTED, false);
+                names.addView(sz);
+                showSize(d, sz);
+                a.addWeighted(r, names, 1, 0);
                 Button refresh = a.button("Refresh", false), del = a.button("Delete", false);
                 r.addView(refresh);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
@@ -115,6 +126,25 @@ class ThemesScreen {
                 refresh.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { download(ThemeCopies.originalOf(d.getName()), true); } });
                 del.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { confirmDelete(d); } });
             }
+        }
+
+        final List<File> left = tc.leftovers();
+        if (!left.isEmpty()) {
+            LinearLayout lc = a.card(body, "Leftovers");
+            final TextView lt = a.text(left.size() + " unfinished folder" + (left.size() == 1 ? "" : "s")
+                    + " from interrupted downloads, taking up space.", 13, MainActivity.WARN, false);
+            lt.setPadding(0, a.dp(6), 0, a.dp(8));
+            lc.addView(lt);
+            Button clean = a.button("Clean up", false);
+            lc.addView(clean, new LinearLayout.LayoutParams(-1, -2));
+            clean.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    long freed = 0;
+                    for (File d : left) { freed += ThemeCopies.size(d); EsdeConfig.deleteTree(d); }
+                    a.toast(String.format(java.util.Locale.ROOT, "Freed %.0f MB.", freed / 1048576.0));
+                    refresh();
+                }
+            });
         }
 
         LinearLayout other = a.card(body, "Another theme");
@@ -151,6 +181,48 @@ class ThemesScreen {
                 }
                 final String fm = msg;
                 a.ui.post(new Runnable() { public void run() { t.setText(fm); t.setTextColor(MainActivity.TEXT); } });
+            }
+        }).start();
+    }
+
+    private void showSize(final File d, final TextView t) {
+        new Thread(new Runnable() {
+            public void run() {
+                final long n = ThemeCopies.size(d);
+                a.ui.post(new Runnable() { public void run() { t.setText(String.format(java.util.Locale.ROOT, "%.0f MB", n / 1048576.0)); } });
+            }
+        }).start();
+    }
+
+    /** Which of your systems have no carousel image in this copy. */
+    private void checkCopy(final File copy) {
+        final AlertDialog wait = a.dialog().setMessage("Checking " + nameOf(copy) + "…").setCancelable(false).show();
+        new Thread(new Runnable() {
+            public void run() {
+                String msg;
+                try {
+                    Engine e = a.newEngine();
+                    List<String> systems = new ArrayList<String>();
+                    for (String sys : e.systems()) {
+                        String[] kids = e.systemDirs.get(sys).list();
+                        if (kids != null && kids.length > 0) systems.add(sys);   // ES-DE hides empty systems anyway
+                    }
+                    for (EsdeConfig.Category c : new EsdeConfig(a.esdeDir, a.romDir).categories())
+                        if (!EsdeConfig.KIND_COLLECTION.equals(c.kind)) { systems.remove(c.name); systems.remove(c.theme); }
+                    List<String> missing = ThemeCopies.missingArt(copy, systems);
+                    if (missing.isEmpty()) msg = "All " + systems.size() + " of your systems have a carousel image in this copy.";
+                    else msg = missing.size() + " of your " + systems.size() + " systems have no carousel image in this copy:\n\n• "
+                            + android.text.TextUtils.join("\n• ", missing)
+                            + "\n\nIf your original theme shows images for these, the copy is incomplete: tap Refresh copy. "
+                            + "If it doesn't either, the theme simply has no art for them (and your categories can get theirs "
+                            + "under Custom look).";
+                } catch (Exception ex) {
+                    msg = "Couldn't check: " + ex.getMessage();
+                }
+                final String fm = msg;
+                a.ui.post(new Runnable() {
+                    public void run() { wait.dismiss(); a.dialog().setTitle("Check copy").setMessage(fm).setPositiveButton("OK", null).show(); }
+                });
             }
         }).start();
     }
