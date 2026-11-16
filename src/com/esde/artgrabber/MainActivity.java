@@ -116,6 +116,20 @@ public class MainActivity extends Activity {
         refreshAccessCard();
         if (romDir == null || esdeDir == null) detectFolders(false);
         else updateLabels();
+        repairMoonlight();
+    }
+
+    /** Moves Moonlight categories made by older versions to the launch method ES-DE always understands. */
+    void repairMoonlight() {
+        if (esdeDir == null || romDir == null || !esdeDir.isDirectory()) return;
+        try {
+            int n = new EsdeConfig(esdeDir, romDir).repairMoonlight();
+            if (n > 0) dialog().setTitle("Moonlight categories fixed")
+                    .setMessage("Updated " + n + " Moonlight categor" + (n == 1 ? "y" : "ies")
+                            + " so ES-DE opens Moonlight directly (this fixes \"missing emulator find rules\"). "
+                            + "Close ES-DE completely and open it again to use them.")
+                    .setPositiveButton("OK", null).show();
+        } catch (Exception ignored) { }   // nothing to fix, or no access yet: tried again next time
     }
 
     @Override

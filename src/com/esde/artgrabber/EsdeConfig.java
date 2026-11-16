@@ -228,15 +228,42 @@ public class EsdeConfig {
                 + "        <fullname>" + x(c.fullName) + "</fullname>\n"
                 + "        <path>" + x(dir.getAbsolutePath()) + "</path>\n"
                 + "        <extension>" + MOONLIGHT_EXT + "</extension>\n"
-                + "        <command label=\"Moonlight\">%EMULATOR_" + MOONLIGHT_EMU + "% %EXTRA_Name%=\"" + x(c.pc.trim())
-                + "\" %EXTRA_AppName%=\"%BASENAME%\"</command>\n"
+                + moonlightCommand("Moonlight", "com.limelight", c.pc)
+                + moonlightCommand("Moonlight (root build)", "com.limelight.root", c.pc)
                 + "        <platform>pc</platform>\n"
                 + "        <theme>" + x(c.theme != null ? c.theme : "windows") + "</theme>\n"
                 + "    </system>";
         putSystem(tx, c.name, block);
-        putMoonlightRule(tx, true);
+        putMoonlightRule(tx, false);   // no longer needed (older versions wrote one): the command names Moonlight itself
         upsert(tx, c);
         tx.commit();
+    }
+
+    /**
+     * Opens Moonlight's shortcut screen directly, the same way ES-DE opens Android apps (%ANDROIDAPP%=package/activity),
+     * so it doesn't depend on an emulator find rule. ES-DE passes the extras with the intent.
+     */
+    static String moonlightCommand(String label, String pkg, String pc) {
+        return "        <command label=\"" + label + "\">%ANDROIDAPP%=" + pkg + "/com.limelight.ShortcutTrampoline %EXTRA_Name%=\""
+                + x(pc.trim()) + "\" %EXTRA_AppName%=\"%BASENAME%\"</command>\n";
+    }
+
+    /**
+     * Moonlight categories made before 2.4 launched through a MOONLIGHT find rule, which ES-DE didn't pick up on some
+     * setups ("missing emulator find rules"). Rewrites them to the direct launch. Returns how many were fixed.
+     */
+    public int repairMoonlight() throws IOException {
+        String text = read(systemsFile());
+        if (text == null || !text.contains("%EMULATOR_" + MOONLIGHT_EMU + "%")) return 0;
+        int n = 0;
+        for (Category c : categories()) {
+            if (!KIND_MOONLIGHT.equals(c.kind) || c.pc == null || c.pc.trim().isEmpty()) continue;
+            String blk = systemBlock(text, c.name);
+            if (blk == null || !blk.contains("%EMULATOR_" + MOONLIGHT_EMU + "%")) continue;
+            saveMoonlightCategory(c, moonlightGames(c));
+            n++;
+        }
+        return n;
     }
 
     private void putMoonlightRule(Tx tx, boolean wanted) throws IOException {

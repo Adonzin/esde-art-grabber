@@ -106,29 +106,44 @@ public class ConfigTest {
         ml.pc = "GAMING-PC";
         cfg.saveMoonlightCategory(ml, Arrays.asList("Cyberpunk 2077", "Desktop", "Steam Big Picture"));
         String s3 = read(sys);
-        check(s3.contains("%EMULATOR_MOONLIGHT% %EXTRA_Name%=\"GAMING-PC\" %EXTRA_AppName%=\"%BASENAME%\""), "Moonlight launch command passes computer and game name");
+        check(s3.contains("%ANDROIDAPP%=com.limelight/com.limelight.ShortcutTrampoline %EXTRA_Name%=\"GAMING-PC\" %EXTRA_AppName%=\"%BASENAME%\""), "Moonlight launches directly with computer and game name");
+        check(s3.contains("%ANDROIDAPP%=com.limelight.root/com.limelight.ShortcutTrampoline") && !EsdeConfig.systemBlock(s3, "moonlight").contains("%EMULATOR_"), "root build offered as alternative; no find rule needed");
+        check(wellFormed(sys), "systems file still valid XML");
         check(new File(roms, "moonlight/Cyberpunk 2077.moonlight").isFile(), "one file per game, named like the game");
-        String rules = read(cfg.findRulesFile());
-        check(rules.contains("com.limelight/com.limelight.ShortcutTrampoline") && wellFormed(cfg.findRulesFile()), "Moonlight find rule written, valid XML");
+        check(read(cfg.findRulesFile()) == null || !read(cfg.findRulesFile()).contains("MOONLIGHT"), "no Moonlight find rule written");
         check(!EsdeConfig.moonlightNameOk("Halo: MCC") && EsdeConfig.moonlightNameOk("Halo MCC"), "names that can't be file names are detected");
+
+        // ---- an old (2.3) Moonlight category: find-rule command plus our rule, repaired to the direct launch
+        String oldSys = read(sys).replace(EsdeConfig.moonlightCommand("Moonlight", "com.limelight", "GAMING-PC")
+                + EsdeConfig.moonlightCommand("Moonlight (root build)", "com.limelight.root", "GAMING-PC"),
+                "        <command label=\"Moonlight\">%EMULATOR_MOONLIGHT% %EXTRA_Name%=\"GAMING-PC\" %EXTRA_AppName%=\"%BASENAME%\"</command>\n");
+        check(oldSys.contains("%EMULATOR_MOONLIGHT%"), "test set-up: old command in place");
+        write(sys, oldSys);
+        write(cfg.findRulesFile(), "<?xml version=\"1.0\"?>\n<ruleList>\n    " + EsdeConfig.MARK + "\n    <emulator name=\"MOONLIGHT\">\n        <rule type=\"androidpackage\">\n"
+                + "            <entry>com.limelight/com.limelight.ShortcutTrampoline</entry>\n        </rule>\n    </emulator>\n</ruleList>\n");
+        check(cfg.repairMoonlight() == 1, "old Moonlight category repaired");
+        check(!read(sys).contains("%EMULATOR_MOONLIGHT%") && read(sys).contains("%ANDROIDAPP%=com.limelight/") && wellFormed(sys), "repaired to direct launch");
+        check(!read(cfg.findRulesFile()).contains("MOONLIGHT") && wellFormed(cfg.findRulesFile()), "old rule cleaned up");
+        check(cfg.moonlightGames(ml).size() == 3, "games kept by the repair");
+        check(cfg.repairMoonlight() == 0, "repair runs only once");
 
         EsdeConfig.Category ml2 = new EsdeConfig.Category();
         ml2.name = "moonlightlaptop";
         ml2.fullName = "Moonlight – Laptop";
         ml2.pc = "Laptop";
         cfg.saveMoonlightCategory(ml2, Collections.singletonList("Hades"));
-        check(read(cfg.findRulesFile()).split("<emulator name=\"MOONLIGHT\">", -1).length == 2, "one shared Moonlight rule for several computers");
+        check(read(sys).contains("%EXTRA_Name%=\"Laptop\""), "second computer has its own category");
         cfg.delete(ml);
-        check(read(cfg.findRulesFile()).contains("MOONLIGHT") && !new File(roms, "moonlight").exists(), "deleting one keeps the rule; empty folder removed");
+        check(!new File(roms, "moonlight").exists(), "deleting one: empty folder removed");
         cfg.delete(ml2);
-        check(!read(cfg.findRulesFile()).contains("MOONLIGHT") && !read(sys).contains("moonlight"), "deleting the last removes the rule and systems");
+        check(!read(sys).contains("moonlight"), "deleting the last removes the systems");
 
         // a Moonlight rule the user wrote is left alone
         String own = "<?xml version=\"1.0\"?>\n<ruleList>\n    <emulator name=\"MOONLIGHT\">\n        <rule type=\"androidpackage\">\n"
                 + "            <entry>com.limelight.custom/com.limelight.ShortcutTrampoline</entry>\n        </rule>\n    </emulator>\n</ruleList>\n";
         write(cfg.findRulesFile(), own);
         cfg.saveMoonlightCategory(ml, Collections.singletonList("Desktop"));
-        check(read(cfg.findRulesFile()).equals(own), "user's own Moonlight rule not replaced");
+        check(read(cfg.findRulesFile()).equals(own), "user's own Moonlight rule not touched");
 
         // ---- collection
         EsdeConfig.Category col = new EsdeConfig.Category();

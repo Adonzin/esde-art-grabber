@@ -16,9 +16,9 @@ An Android companion app for [ES-DE](https://es-de.org), made for handhelds like
 | **Collection** | An ES-DE custom collection of entries you already have, optionally as its own item | *Media*: VLC, Kodi, Plex |
 
 How it works under the hood:
-- App and Moonlight categories are written to `ES-DE/custom_systems/es_systems.xml` (Moonlight also adds an emulator rule to `es_find_rules.xml`), with each category's entries in its own folder in your ROMs folder.
+- App and Moonlight categories are written to `ES-DE/custom_systems/es_systems.xml`, with each category's entries in its own folder in your ROMs folder.
 - App categories use ES-DE's own Android Apps launch method: each `.app` file holds an app's package name.
-- Moonlight entries launch Moonlight's shortcut screen with the computer's name and the game's name, so each entry must be named exactly like the game in Moonlight.
+- Moonlight entries open Moonlight's shortcut screen directly (`%ANDROIDAPP%=com.limelight/com.limelight.ShortcutTrampoline`, the same way ES-DE opens apps, so no emulator find rule is needed) with the computer's name and the game's name, so each entry must be named exactly like the game in Moonlight. The root build of Moonlight is offered as an alternative emulator.
 - **Get games from my PC** fills a Moonlight category from Sunshine/Apollo itself: hosts are found on the network over mDNS (`_nvstream._tcp`, as Moonlight does), the PC name comes from its public `/serverinfo`, and the app list from the settings server's `/api/apps`. Sunshine takes HTTP Basic login and Apollo a `/api/login` session cookie; both are tried. Only home-network addresses are allowed, and the self-signed certificate is pinned on first use.
 - Collections are `ES-DE/collections/custom-<name>.cfg`, switched on in `es_settings.xml`.
 - Entries this app made are marked `<!-- ES-DE Commander -->`. Systems, rules and files you made yourself are never changed, and ES-DE's own system names can't be reused.
